@@ -7,13 +7,21 @@ def detect_encoding(file_path):
         return result['encoding']
     
 # Función para importar datos de un archivo de texto
-def import_test_data_text(file_path, num_variables, data_lines, delimiter, variable_names, variable_types):
+def import_test_data_text(file_path, delimiter, variable_names):
     # Opciones para importar
     encoding = detect_encoding(file_path)  # Detecta la codificación
-    skip_rows = list(range(data_lines[0] - 1))  # Filas a saltar
-    dtype = {variable_names[i]: variable_types[i] for i in range(num_variables)}
     
     # Lectura de datos con pandas
-    df = pd.read_csv(file_path, delimiter=delimiter, skiprows=skip_rows, names=variable_names, dtype=dtype, encoding=encoding)
+    df = pd.read_csv(filepath_or_buffer=file_path, sep=delimiter, names=variable_names, encoding=encoding)
+    df = df.dropna()  # Omitir filas con errores de importación o vacías
+    return df
+
+# Función para importar datos de un archivo de Excel
+def import_test_data_excel(file_path, sheet_name, variable_names):
+    # Opciones para importar
+    encoding = detect_encoding(file_path)  # Detecta la codificación
+    
+    # Lectura de datos con pandas
+    df = pd.read_excel(io=file_path, sheet_name=sheet_name, names=variable_names, encoding=encoding)
     df = df.dropna()  # Omitir filas con errores de importación o vacías
     return df
