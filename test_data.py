@@ -17,11 +17,11 @@ def import_test_data_text(file_path, delimiter, variable_names):
     return df
 
 # Función para importar datos de un archivo de Excel
-def import_test_data_excel(file_path, sheet_name, variable_names):
+def import_test_data_excel(file_path, sheet_idx, variable_names):
     # Opciones para importar
     encoding = detect_encoding(file_path)  # Detecta la codificación
     
     # Lectura de datos con pandas
-    df = pd.read_excel(io=file_path, sheet_name=sheet_name, names=variable_names, encoding=encoding)
+    df = pd.read_excel(io=file_path, sheet_name=sheet_idx, names=variable_names, encoding=encoding)
     df = df.dropna()  # Omitir filas con errores de importación o vacías
     return df
