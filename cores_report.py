@@ -5,7 +5,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from test_ledi import Axial_compression_test_report
 
 # Parámetros iniciales
-report_id = '274-24'
+infle = '274-24'
+subinfle = ''
 empresa = 'TECCA'
 cores_id = [id+1 for id in range(24)]
 acred = 'acreditado'

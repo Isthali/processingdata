@@ -10,6 +10,9 @@ class Mechanical_test:
         self.data = pd.DataFrame()
         self.data_process = pd.DataFrame()
         self.data_file = 'data_file'
+        self.maxLoad = 0
+        self.minLoad = 0
+        self.idx = {'minLoad': 0, 'maxLoad': 0}
     
     def get_data(self, data_file, data_source, variable_names):
         self.data_file = data_file
@@ -23,19 +26,40 @@ class Mechanical_test:
 
         return self.data
             
-    def preprocess_data(self):
+    def make_positive_data(self):
+        for col in self.data.columns:
+            self.data[col] = np.abs(self.data[col])
+
         return self.data
     
+    def get_max_load(self):
+        if self.data.empty:
+            raise ValueError("Error: load data before calculating the maximum load.")
+        else:
+            self.idx['maxLoad'] = np.argmax(np.abs(self.data['Load'].to_numpy()))
+            self.maxLoad = np.max(self.data['Load'].to_numpy())
+
+        return self.maxLoad
+    
+    def get_min_load(self):
+        if self.data.empty:
+            raise ValueError("Error: load data before calculating the maximum load.")
+        else:
+            self.idx['minLoad'] = np.argmin(np.abs(self.data['Load'].to_numpy()))
+            self.maxLoad = np.min(self.data['Load'].to_numpy())
+
+        return self.maxLoad
+
     def plot_data(self, x, y, title, xlabel, ylabel, legend, infle, test_name, num_pag, final_pag=False):
         fig, ax = plt.subplots(figsize=(11.7, 8.3))
-        ax.plot(self.data[x], self.data[y], 'b-', linewidth=2)
+        ax.plot(self.data_process[x], self.data_process[y], 'b-', linewidth=2)
         ax.set_title(title, fontsize=10)
         ax.set_xlabel(xlabel, fontsize=9)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.legend(legend, fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        ax.set_position([0.1, 0.15, 0.7, 0.75])
+        ax.set_position([0.10, 0.15, 0.70, 0.75])
         fig.text(0.05, 0.05, f'INF-LE {infle}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
         fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
@@ -48,34 +72,15 @@ class Mechanical_test:
 class Resistance_mechanical_test(Mechanical_test):
     def __init__(self):
         super().__init__()
-        self.maxLoad = 0
         self.idx = {'i': 0, 'f': 0, 'maxLoad': 0}
 
-    def get_positive_data(self):
-        for col in self.data.columns:
-            self.data[col] = np.abs(self.data[col])
-
-        return self.data
-
-    def get_data(self, data_file, data_source, variable_names):
-        self.data = super().get_data(data_file, data_source, variable_names)
-        self.get_positive_data()
-
-        return self.data
-
-    def get_max_load(self):
-        if self.data.empty:
-            raise ValueError("Error: load data before calculating the maximum load.")
-        else:
-            self.idx['maxLoad'] = np.argmax(self.data['Load'])
-            self.maxLoad = np.max(self.data['Load'])
-
-        return self.maxLoad
-
     def preprocess_data(self):
+        super().get_max_load()
+        super().make_positive_data()
         imaxP = self.idx['maxLoad']
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
         self.idx['f'] = np.argmin(np.abs(self.data.loc[imaxP:, 'Load'].to_numpy() - 0.8 * self.maxLoad)) + imaxP
+        self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
 
         return self.idx
 
@@ -120,7 +125,6 @@ class Axial_compression_test_report:
         for id in self.samples_id:
             test = Axial_compression_test(sample_id=id, data_file=f'{self.folder}{self.repor_id['infle']}-d{id}/specimen.dat')
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
-            test.get_max_load()
             test.preprocess_data()
             self.tests.append(test)
     
