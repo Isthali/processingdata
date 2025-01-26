@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-from test_data import import_test_data_text, import_test_data_excel, get_report_data, write_report_data
+from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel
+from putformatPDF import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
 
 class Mechanical_test:
     def __init__(self):
@@ -18,9 +19,9 @@ class Mechanical_test:
         self.data_file = data_file
         
         if data_source == 'csv':
-            self.data = import_test_data_text(file_path=self.data_file, delimiter='\t', variable_names=variable_names)
+            self.data = import_data_text(file_path=self.data_file, delimiter='\t', variable_names=variable_names)
         elif data_source == 'xlsx':
-            self.data = import_test_data_excel(file_path=self.data_file, sheet_idx=0, variable_names=variable_names)
+            self.data = import_data_excel(file_path=self.data_file, sheet_idx=0, variable_names=variable_names)
         else:
             print("Error: data_source not recognized.")
 
@@ -119,7 +120,9 @@ class Axial_compression_test_report:
         self.empresa = empresa
         self.samples_id = samples_id
         self.tests = []
-        self.report_file = f'{folder}INFLE_{infle}{subinfle}_Cores_{empresa}_{len(self.samples_id)}.xlsm'
+        self.excel_file = f'{folder}INFLE_{infle}{subinfle}_Cores_{empresa}_{len(self.samples_id)}.xlsm'
+        self.plots_file = f'{folder}plots.pdf'
+        self.report_file = f'{folder}INFLE_{infle}{subinfle}_Cores_{empresa}_{len(self.samples_id)}.pdf'
     
     def add_tests(self):
         for id in self.samples_id:
@@ -132,20 +135,30 @@ class Axial_compression_test_report:
         for i, test in enumerate(self.tests):
             row = i + 16
             column = 23
-            write_report_data(file_path=self.report_file, sheet_name='Cores', position=(row, column), val=test.get_max_load())
+            write_data_excel(file_path=self.excel_file, sheet_name='Cores', position=(row, column), val=test.get_max_load())
             #column = 2
-            #write_report_data(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_area_section(cell=(1, 1)))
+            #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_area_section(cell=(1, 1)))
             #column = 3
-            #write_report_data(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_strength())
+            #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_strength())
 
     def plot_report(self):
-        with PdfPages(f'{self.folder}/report.pdf') as pdf:
+        with PdfPages(f'{self.plots_file}') as pdf_file:
             for i, test in enumerate(self.tests):
                 if i == len(self.tests) - 1:
-                    fig, ax = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+3, final_pag=True)
+                    fig, ax = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+4, final_pag=True)
                 else:
-                    fig, ax = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+3, final_pag=False)
+                    fig, ax = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+4, final_pag=False)
                 
-                pdf.savefig(fig)
+                pdf_file.savefig(fig)
                 plt.close()
-            
+    
+    def get_report_file(self, acred):
+        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_{acred}.pdf'
+        self.add_tests()
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
+        self.plot_report()
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
+        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
+        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+        

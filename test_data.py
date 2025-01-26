@@ -10,7 +10,7 @@ def detect_encoding(file_path):
     return result['encoding']
     
 # Función para importar datos de un archivo de texto
-def import_test_data_text(file_path, delimiter, variable_names):
+def import_data_text(file_path, delimiter, variable_names):
     # Opciones para importar
     encoding = detect_encoding(file_path)  # Detecta la codificación
     
@@ -21,7 +21,7 @@ def import_test_data_text(file_path, delimiter, variable_names):
     return df
 
 # Función para importar datos de un archivo de Excel
-def import_test_data_excel(file_path, sheet_idx, variable_names):
+def import_data_excel(file_path, sheet_idx, variable_names):
     # Lectura de datos con pandas
     df = pd.read_excel(io=file_path, sheet_name=sheet_idx, names=variable_names, dtype=np.float64)
     df = df.dropna()  # Omitir filas con errores de importación o vacías
@@ -29,7 +29,7 @@ def import_test_data_excel(file_path, sheet_idx, variable_names):
     return df
 
 # Función para obtener valores para procesamiento
-def get_report_data(file_path, sheet_idx, position=(1, 1)):
+def get_data_excel(file_path, sheet_idx, position=(1, 1)):
     # Abrir el archivo Excel
     with xl.load_workbook(filename=file_path, keep_vba=True) as wb:
         # Seleccionar la hoja
@@ -46,7 +46,7 @@ def get_report_data(file_path, sheet_idx, position=(1, 1)):
     return val
 
 # Función para guardar valor en un archivo Excel
-def write_report_data(file_path, sheet_name, position, val):
+def write_data_excel(file_path, sheet_name, position, val):
     # Abrir el archivo Excel
     wb = xl.load_workbook(filename=file_path, keep_vba=True)  # Carga el archivo sin usar 'with'
     
