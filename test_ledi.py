@@ -50,6 +50,13 @@ class Mechanical_test:
             self.maxLoad = np.min(self.data['Load'].to_numpy())
 
         return self.maxLoad
+    
+    def get_interp_data(self, x_name, y_name, x_new_values):
+        x = self.data[x_name].to_numpy()
+        y = self.data[y_name].to_numpy()
+        y_new_values = np.interp(x_new_values, x, y)
+
+        return y_new_values
 
     def plot_data(self, x, y, title, xlabel, ylabel, legend, infle, test_name, num_pag, final_pag=False):
         fig, ax = plt.subplots(figsize=(11.7, 8.3))
@@ -84,6 +91,16 @@ class Resistance_mechanical_test(Mechanical_test):
         self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
 
         return self.idx
+
+class Toughness_mechanical_test(Resistance_mechanical_test):
+    def __init__(self):
+        super().__init__()
+        self.idx = {'i': 0,  'f': 0, 'iL':0, 'maxLoad': 0}
+
+    def get_toughness(self):
+        self.toughness = np.trapz(self.data_process['Load'], self.data_process['Displacement'])
+
+        return self.toughness
 
 class Axial_compression_test(Resistance_mechanical_test):
     def __init__(self, sample_id=None, data_file= None):
