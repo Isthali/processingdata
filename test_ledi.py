@@ -59,24 +59,41 @@ class Mechanical_test:
 
         return y_new_values
 
-    def plot_data(self, x, y, title, xlabel, ylabel, legend, infle, test_name, num_pag, final_pag=False):
-        fig, ax = plt.subplots(figsize=(11.7, 8.3))
-        ax.plot(self.data_process[x], self.data_process[y], 'b-', linewidth=2)
-        ax.set_title(title, fontsize=10)
-        ax.set_xlabel(xlabel, fontsize=9)
-        ax.set_ylabel(ylabel, fontsize=9)
-        ax.legend(legend, fontsize=9)
-        ax.grid(visible=True, which='both', linestyle='--')
-        ax.minorticks_on()
-        ax.set_position([0.10, 0.15, 0.70, 0.75])
-        fig.text(0.05, 0.05, f'INF-LE {infle}', fontsize=8, horizontalalignment='left')
-        fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
-        fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
+def plot_data(self, x, y, title, xlabel, ylabel, legend, infle, test_name, num_pag, final_pag=False, superposed=False):
+    fig, ax = plt.subplots(figsize=(11.7, 8.3))
 
-        if final_pag:
-            fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
-        
-        return fig, ax
+    if superposed:
+        # Trazar múltiples curvas en el mismo gráfico
+        for i, (x_vals, y_vals) in enumerate(zip(x, y)):
+            ax.plot(
+                self.data_process[x_vals], 
+                self.data_process[y_vals], 
+                label=legend[i], 
+                linewidth=2
+            )
+    else:
+        # Trazar una única curva
+        ax.plot(self.data_process[x], self.data_process[y], 'b-', linewidth=2)
+
+    # Configuración común del gráfico
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.set_ylabel(ylabel, fontsize=9)
+    ax.legend(fontsize=9)
+    ax.grid(visible=True, which='both', linestyle='--')
+    ax.minorticks_on()
+    ax.set_position([0.10, 0.15, 0.70, 0.75])
+
+    # Texto adicional en el gráfico
+    fig.text(0.05, 0.05, f'INF-LE {infle}', fontsize=8, horizontalalignment='left')
+    fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
+    fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
+
+    if final_pag:
+        fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
+
+    return fig, ax
+
 
 class Resistance_mechanical_test(Mechanical_test):
     def __init__(self):
@@ -258,9 +275,9 @@ class Panel_toughness_test_report:
         with PdfPages(f'{self.plots_file}') as pdf_file:
             for i, test in enumerate(self.tests):
                 if i == len(self.tests) - 1:
-                    fig, _ = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+4, final_pag=True)
+                    fig, _ = test.plot_data(x='Deflection', y='Load', title='Fuerza-Deflexión', xlabel='Deflexión (mm)', ylabel='Fuerza (kN)', legend=[f'PANEL {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE TENACIDAD POR FLEXIÓN', num_pag=i+4, final_pag=True)
                 else:
-                    fig, _ = test.plot_data(x='Displacement', y='Load', title='Fuerza-Desplazamiento', xlabel='Desplazamiento (mm)', ylabel='Fuerza (kN)', legend=[f'TESTIGO {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN', num_pag=i+4, final_pag=False)
+                    fig, _ = test.plot_data(x='Deflection', y='Load', title='Fuerza-Deflexión', xlabel='Deflexión (mm)', ylabel='Fuerza (kN)', legend=[f'PANEL {test.get_sample_id()}'], infle=f'{self.repor_id['infle']}{self.repor_id['subinfle']}', test_name='ENSAYO DE TENACIDAD POR FLEXIÓN', num_pag=i+4, final_pag=False)
                 
                 pdf_file.savefig(fig)
                 plt.close()
