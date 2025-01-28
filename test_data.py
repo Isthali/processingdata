@@ -23,7 +23,7 @@ def import_data_text(file_path, delimiter, variable_names):
 # Función para importar datos de un archivo de Excel
 def import_data_excel(file_path, sheet_idx, variable_names):
     # Lectura de datos con pandas
-    df = pd.read_excel(io=file_path, sheet_name=sheet_idx, names=variable_names, dtype=np.float64)
+    df = pd.read_excel(io=file_path, sheet_name=sheet_idx, names=variable_names, dtype=np.float64, skiprows=49)
     df = df.dropna()  # Omitir filas con errores de importación o vacías
     
     return df
