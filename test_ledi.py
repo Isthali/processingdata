@@ -15,25 +15,24 @@ class Mechanical_test:
         self.maxLoad = 0
         self.minLoad = 0
         self.idx = {'minLoad': 0, 'maxLoad': 0}
+
+    def get_sample_id(self):
+        return self.sample_id
     
     def get_data(self, data_file, data_source, variable_names):
-        self.data_file = data_file
-        
+        self.data_file = data_file    
         if data_source == 'csv':
             self.data = import_data_text(file_path=self.data_file, delimiter='\t', variable_names=variable_names)
         elif data_source == 'xlsx':
             self.data = import_data_excel(file_path=self.data_file, sheet_idx=0, variable_names=variable_names)
         else:
             print("Error: data_source not recognized.")
-
         return self.data
             
     def make_positive_data(self, columns=None):
         columns = columns or self.data.columns  # Procesa todas las columnas si no se especifica
-        
         for col in columns:
             self.data[col] = np.abs(self.data[col])
-
         return self.data
     
     def get_max_load(self):
@@ -42,7 +41,6 @@ class Mechanical_test:
         else:
             self.idx['maxLoad'] = np.argmax(np.abs(self.data['Load'].to_numpy()))
             self.maxLoad = np.max(self.data['Load'].to_numpy())
-
         return self.maxLoad
     
     def get_min_load(self):
@@ -51,19 +49,16 @@ class Mechanical_test:
         else:
             self.idx['minLoad'] = np.argmin(np.abs(self.data['Load'].to_numpy()))
             self.maxLoad = np.min(self.data['Load'].to_numpy())
-
         return self.maxLoad
     
     def get_interp_data(self, x_name, y_name, x_new_values):
         x = self.data[x_name].to_numpy()
         y = self.data[y_name].to_numpy()
         y_new_values = np.interp(x_new_values, x, y)
-
         return y_new_values
 
-    def plot_data(self, x, y, title, xlabel, ylabel, legend, infle, test_name, num_pag, final_pag=False, superposed=False):
+    def plot_data(self, x, y, xlim, ylim, title, xlabel, ylabel, legend, report_id, test_name, num_pag, final_pag=False, superposed=False):
         fig, ax = plt.subplots(figsize=(11.7, 8.3))
-
         if superposed:
             # Trazar múltiples curvas en el mismo gráfico
             for i, (x_vals, y_vals) in enumerate(zip(x, y)):
@@ -76,8 +71,8 @@ class Mechanical_test:
         else:
             # Trazar una única curva
             ax.plot(self.data_process[x], self.data_process[y], 'b-', label=legend[0], linewidth=2)
-
         # Configuración común del gráfico
+        ax.set(xlim=xlim, ylim=ylim)
         ax.set_title(title, fontsize=10)
         ax.set_xlabel(xlabel, fontsize=9)
         ax.set_ylabel(ylabel, fontsize=9)
@@ -85,15 +80,12 @@ class Mechanical_test:
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
         ax.set_position([0.10, 0.15, 0.70, 0.75])
-
         # Texto adicional en el gráfico
-        fig.text(0.05, 0.05, f'INF-LE {infle}', fontsize=8, horizontalalignment='left')
+        fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
         fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
-
         if final_pag:
             fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
-
         return fig, ax
 
 class Resistance_mechanical_test(Mechanical_test):
@@ -108,7 +100,6 @@ class Resistance_mechanical_test(Mechanical_test):
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
         self.idx['f'] = np.argmin(np.abs(self.data.loc[imaxP:, 'Load'].to_numpy() - 0.8 * self.maxLoad)) + imaxP
         self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
-
         return self.idx
 
 class Toughness_mechanical_test(Mechanical_test):
@@ -120,29 +111,39 @@ class Toughness_mechanical_test(Mechanical_test):
     def get_toughness(self):
         toughness = sp.integrate.cumulative_trapezoid(y=self.data['Load'].to_numpy(), x=self.data['Deflection'].to_numpy(), initial=0)
         self.data['Toughness'] = toughness
-
         return self.data['Toughness']
     
     def get_first_peak(self):
         peaks, _ = sp.signal.find_peaks(x=self.data['Load'].to_numpy(), height=0.1*self.maxLoad, prominence=0.1*self.maxLoad, width=10)
-        
         if len(peaks) == 0 or peaks[0] > self.idx['maxLoad']:
             self.idx['iL'] = self.idx['maxLoad']
         else:
             self.idx['iL'] = peaks[0]
-
         return self.idx['iL']
     
+    def set_defl_cps(self, defl_points=np.array([])):
+        loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
+        toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
+        idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
+        self.defl_cps = pd.concat([
+            self.data.loc[idx, ['Deflection', 'Load', 'Toughness']],
+            pd.DataFrame({'Deflection': defl_points, 'Load': loads, 'Toughness': toughness})
+            ])
+        return self.defl_cps
+
+    def get_defl_cps(self):
+        return self.defl_cps
+
     def preprocess_data(self):
         super().get_max_load()
         super().make_positive_data()
         self.get_toughness()
         self.get_first_peak()
+        self.set_defl_cps()
         imaxP = self.idx['maxLoad']
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
         self.idx['f'] = len(self.data)-1
         self.data_process = self.data.loc[self.idx['i']:, :]
-
         return self.idx
 
 class Axial_compression_test(Resistance_mechanical_test):
@@ -153,9 +154,6 @@ class Axial_compression_test(Resistance_mechanical_test):
         self.area_sec = 0
         self.strength = 0
 
-    def get_sample_id(self):
-        return self.sample_id
-
     def get_area_section(self, length_sec=None, section_type=None):
         if section_type=='circular':
             self.area_sec = np.pi*(length_sec/2)**2
@@ -165,12 +163,10 @@ class Axial_compression_test(Resistance_mechanical_test):
             self.area_sec = length_sec[0]*length_sec[1]
         else:
             print("Error: no section type selected.")
-               
         return self.area_sec
     
     def get_strength(self):
         self.strength = self.maxLoad/self.area_sec
-
         return self.strength
     
 class Panels_toughness_test(Toughness_mechanical_test):
@@ -179,38 +175,225 @@ class Panels_toughness_test(Toughness_mechanical_test):
         self.sample_id = sample_id
         self.data_file = data_file
 
-    def get_sample_id(self):
-        return self.sample_id
-    
-    def set_defl_cps(self, defl_points=np.array([])):
-        loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
-        toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
+class Test_report:
+    """
+    Clase para generar informes.
 
-        idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
-        self.defl_cps = pd.concat([
-            self.data.loc[idx, ['Deflection', 'Load', 'Toughness']],
-            pd.DataFrame({'Deflection': defl_points, 'Load': loads, 'Toughness': toughness})
-            ])
-
-        return self.defl_cps
-
-    def get_defl_cps(self):
-        return self.defl_cps
-
-class Axial_compression_test_report:
-    def __init__(self, infle=None, subinfle=None, folder=None, empresa=None, samples_id=[]):
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.folder = folder
-        self.empresa = empresa
-        self.samples_id = samples_id
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self):
+        self.repor_id = {'infle': 'infle', 'subinfle': 'subinfle'}
+        self.standard_test = 'standard'
+        self.folder_path = 'folder'
+        self.client_id = 'empresa'
+        self.samples_id = []
         self.tests = []
-        self.excel_file = f'{folder}INFLE_{infle}{subinfle}_Cores_{empresa}_{len(self.samples_id)}.xlsm'
-        self.plots_file = f'{folder}plots.pdf'
-        self.report_file = f'{folder}INFLE_{infle}{subinfle}_Cores_{empresa}_{len(self.samples_id)}.pdf'
+        self.excel_file = 'excel_file'
+        self.plots_file = 'plots_file'
+        self.report_file = 'report_file'
+
+    def set_report_files(self):
+        self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.xlsm'
+        self.plots_file = f'{self.folder_path}plots.pdf'
+        self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.pdf'
+        return self.excel_file, self.report_file
     
     def add_tests(self):
+        return self.tests
+    
+    def write_report(self):
+        return self.report_file
+
+    def plot_report_data(self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_pag, final_pag=False):
+            # Preparar datos para gráficos superpuestos
+            fig, ax = plt.subplots(figsize=(11.7, 8.3))
+            legends = [f'{sample_name} {test.get_sample_id()}' for test in self.tests]
+            for i, test in enumerate(self.tests):
+                data = test.data_process
+                ax.plot(data[x], data[y], label=legends[i], linewidth=2)
+            # Configuración común del gráfico
+            ax.set(xlim=xlim, ylim=ylim)
+            ax.set_title(title, fontsize=10)
+            ax.set_xlabel(xlabel, fontsize=9)
+            ax.set_ylabel(ylabel, fontsize=9)
+            ax.legend(fontsize=9)
+            ax.grid(visible=True, which='both', linestyle='--')
+            ax.minorticks_on()
+            ax.set_position([0.10, 0.15, 0.70, 0.75])
+            # Texto adicional en el gráfico
+            fig.text(0.05, 0.05, f'INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}', fontsize=8, horizontalalignment='left')
+            fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
+            fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
+            if final_pag:
+                fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
+            return fig, ax
+
+    def make_plot_report(
+            self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_1plot_pag, final_pag=False,
+            comparative=False, x_comp=None, y_comp=None, xlim_comp=None, ylim_comp=None, title_comp=None, xlabel_comp=None, ylabel_comp=None):
+        """Genera gráficos de los resultados."""
+        with PdfPages(self.plots_file) as pdf_file:
+            if comparative:
+                fig_report, _ = self.plot_report_data(
+                    x=x_comp,
+                    y=y_comp,
+                    xlim=xlim_comp,
+                    ylim=ylim_comp,
+                    title=title_comp,
+                    xlabel=xlabel_comp,
+                    ylabel=ylabel_comp,
+                    sample_name=sample_name,
+                    test_name=test_name,
+                    num_pag=num_1plot_pag,
+                    final_pag=final_pag,
+                    superposed=True
+                    )
+                pdf_file.savefig(fig_report)
+                num_1plot_pag += 1
+            for i, test in enumerate(self.tests):
+                is_final_page = (i == len(self.tests)-1)
+                fig_test, _ = test.plot_data(
+                    x=x,
+                    y=y,
+                    xlim=xlim,
+                    ylim=ylim,
+                    title=title,
+                    xlabel=xlabel,
+                    ylabel=ylabel,
+                    legend=[f'{sample_name} {test.get_sample_id()}'],
+                    report_id=f"{self.repor_id['infle']}{self.repor_id['subinfle']}",
+                    test_name=test_name,
+                    num_pag=i+num_1plot_pag,
+                    final_pag=is_final_page
+                    )
+                pdf_file.savefig(fig_test)
+                plt.close()
+
+    def make_report_file(self):
+        return self.report_file
+
+class Panel_toughness_test_report(Test_report):
+    """
+    Clase para generar informes de pruebas de tenacidad en paneles.
+
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+        super().__init__()
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = samples_id
+        self.tests = []
+        self.defl_points = np.array([])
+        super().set_report_files()
+    
+    def set_defl_points(self):
+        """Configura los puntos de deflexión según la norma."""
+        standards_map = {
+            'ASTMC1550': [5., 10., 20., 30., 40., 45.],
+            'EFNARC1996': [5., 10., 15., 20., 25., 30.],
+            'EFNARC1999': [5., 10., 15., 20., 25., 30.]
+        }
+        self.defl_points = np.array(standards_map.get(self.standard_test, []))
+        if self.defl_points.size == 0:
+            raise ValueError(f"Norma no reconocida: {self.standard_test}")
+        return self.defl_points
+
+    def add_tests(self):
+        """Agrega pruebas basadas en los identificadores de muestras."""
+        self.set_defl_points()
+
         for id in self.samples_id:
-            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder}{self.repor_id['infle']}-d{id}/specimen.dat')
+            test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder_path}Losa M{id}.xlsx')
+            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
+            test.preprocess_data()
+            self.tests.append(test)
+
+    def write_report(self):
+        """Escribe los resultados en un archivo Excel."""
+        for i, test in enumerate(self.tests):
+            row_start = 5 * i + 18  # Posición inicial de la fila para cada prueba
+            defl_cps = test.get_defl_cps()
+            for j, (deflection, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])):
+                column = 4 + j
+                data = [load, deflection, toughness]
+                for offset, value in enumerate(data):
+                    write_data_excel(file_path=self.excel_file, sheet_name='Resultados', position=(row_start + offset, column), val=value)
+
+    def make_report_file(self):
+        """Genera el archivo de informe final."""
+        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_no_acreditado.pdf'
+        x='Deflection'
+        y='Load'
+        xlim=(0, 30)
+        ylim=(0, None)
+        title='Fuerza-Deflexión'
+        xlabel='Deflexión (mm)'
+        ylabel='Fuerza (kN)'
+        sample_name='PANEL'
+        test_name='ENSAYO DE TENACIDAD POR FLEXIÓN'
+        num_1plot_pag=4
+        comparative=True
+
+        x_comp='Deflection'
+        y_comp='Toughness'
+        xlim_comp=(0, 30)
+        ylim_comp=(0, None)
+        title_comp='Energía-Deflexión'
+        xlabel_comp='Deflexión (mm)'
+        ylabel_comp='Energía (J)'       
+
+        self.add_tests()
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
+        self.make_plot_report(
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
+            comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
+            )
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf_path=self.report_file)
+        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
+        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+
+class Axial_compression_test_report(Test_report):
+    """
+    Clase para generar informes de pruebas de tenacidad en paneles.
+
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+        super().__init__()
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = samples_id
+        self.tests = []
+        self.defl_points = np.array([])
+        super().set_report_files()
+
+    def add_tests(self):
+        for id in self.samples_id:
+            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat')
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
@@ -244,131 +427,27 @@ class Axial_compression_test_report:
                 pdf_file.savefig(fig_test)
                 plt.close()
     
-    def get_report_file(self, acred):
-        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_{acred}.pdf'
-        self.add_tests()
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
-        self.plot_report()
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
-
-class Panel_toughness_test_report:
-    """
-    Clase para generar informes de pruebas de tenacidad en paneles.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        empresa (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, empresa=None, samples_id=[]):
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard = standard
-        self.defl_points = np.array([])
-        self.folder = folder
-        self.empresa = empresa
-        self.samples_id = samples_id
-        self.tests = []
-        self.excel_file = f'{folder}INFLE_{infle}{subinfle}_{standard}_{empresa}_{len(self.samples_id)}.xlsm'
-        self.plots_file = f'{folder}plots.pdf'
-        self.report_file = f'{folder}INFLE_{infle}{subinfle}_{standard}_{empresa}_{len(self.samples_id)}.pdf'
-    
-    def set_defl_points(self):
-        """Configura los puntos de deflexión según la norma."""
-        standards_map = {
-            'ASTMC1550': [5., 10., 20., 30., 40., 45.],
-            'EFNARC1996': [5., 10., 15., 20., 25., 30.],
-            'EFNARC1999': [5., 10., 15., 20., 25., 30.]
-        }
-        self.defl_points = np.array(standards_map.get(self.standard, []))
-        if self.defl_points.size == 0:
-            raise ValueError(f"Norma no reconocida: {self.standard}")
-        return self.defl_points
-
-    def add_tests(self):
-        """Agrega pruebas basadas en los identificadores de muestras."""
-        self.set_defl_points()
-
-        for id in self.samples_id:
-            test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder}Losa M{id}.xlsx')
-            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
-            test.preprocess_data()
-            test.set_defl_cps(defl_points=self.defl_points)
-            self.tests.append(test)
-
-    def write_report(self):
-        """Escribe los resultados en un archivo Excel."""
-        for i, test in enumerate(self.tests):
-            row_start = 5 * i + 18  # Posición inicial de la fila para cada prueba
-            defl_cps = test.get_defl_cps()
-            for j, (deflection, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])):
-                column = 4 + j
-                data = [load, deflection, toughness]
-                for offset, value in enumerate(data):
-                    write_data_excel(file_path=self.excel_file, sheet_name='Resultados', position=(row_start + offset, column), val=value)
-
-    def plot_report(self):
-        """Genera gráficos de los resultados."""
-        with PdfPages(self.plots_file) as pdf_file:
-            # Preparar datos para gráficos superpuestos
-            fig, ax = plt.subplots(figsize=(11.7, 8.3))
-            legends = [f'PANEL {test.get_sample_id()}' for test in self.tests]
-            for i, test in enumerate(self.tests):
-                data = test.data_process
-                ax.plot(data['Deflection'], data['Toughness'], label=legends[i], linewidth=2)
-
-            title='Energía-Deflexión'
-            xlabel='Deflexión (mm)'
-            ylabel='Energía (J)'
-            infle=f"{self.repor_id['infle']}{self.repor_id['subinfle']}"
-            test_name='ENSAYO DE TENACIDAD POR FLEXIÓN'
-            num_pag=4
-
-            # Configuración común del gráfico
-            ax.set_title(title, fontsize=10)
-            ax.set_xlabel(xlabel, fontsize=9)
-            ax.set_ylabel(ylabel, fontsize=9)
-            ax.legend(fontsize=9)
-            ax.grid(visible=True, which='both', linestyle='--')
-            ax.minorticks_on()
-            ax.set_position([0.10, 0.15, 0.70, 0.75])
-
-            # Texto adicional en el gráfico
-            fig.text(0.05, 0.05, f'INF-LE {infle}', fontsize=8, horizontalalignment='left')
-            fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
-            fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
-            pdf_file.savefig(fig)
-            plt.close()
-
-            for i, test in enumerate(self.tests):
-                is_final_page = (i == len(self.tests)-1)
-                fig_test, _ = test.plot_data(
-                    x='Deflection',
-                    y='Load',
-                    title='Fuerza-Deflexión',
-                    xlabel='Deflexión (mm)',
-                    ylabel='Fuerza (kN)',
-                    legend=[f'PANEL {test.get_sample_id()}'],
-                    infle=f"{self.repor_id['infle']}{self.repor_id['subinfle']}",
-                    test_name='ENSAYO DE TENACIDAD POR FLEXIÓN',
-                    num_pag=i+5,
-                    final_pag=is_final_page
-                    )
-                pdf_file.savefig(fig_test)
-                plt.close()
-
-    def get_report_file(self, acred):
+    def make_report_file(self):
         """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_{acred}.pdf'
+        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_no_acreditado.pdf'
+        x='Displacement'
+        y='Load'
+        xlim=(0, None)
+        ylim=(0, None)
+        title='Fuerza-Desplazamiento'
+        xlabel='Desplazamiento (mm)'
+        ylabel='Fuerza (kN)'
+        sample_name='CORE'
+        test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN'
+        num_1plot_pag=4
+        comparative=False
+
         self.add_tests()
         self.write_report()
         convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
-        self.plot_report()
+        self.make_plot_report(
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False
+            )
         merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
