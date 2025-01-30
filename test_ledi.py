@@ -79,13 +79,13 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        ax.set_position([0.10, 0.15, 0.70, 0.75])
+        ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
         fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
         if final_pag:
-            fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
+            fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
         return fig, ax
 
 class Resistance_mechanical_test(Mechanical_test):
@@ -225,13 +225,13 @@ class Test_report:
             ax.legend(fontsize=9)
             ax.grid(visible=True, which='both', linestyle='--')
             ax.minorticks_on()
-            ax.set_position([0.10, 0.15, 0.70, 0.75])
+            ax.set_position([0.10, 0.15, 0.75, 0.75])
             # Texto adicional en el gráfico
             fig.text(0.05, 0.05, f'INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}', fontsize=8, horizontalalignment='left')
             fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
             fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
             if final_pag:
-                fig.text(0.85, 0.01, 'Fin del informe', fontsize=8, horizontalalignment='right')
+                fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
             return fig, ax
 
     def make_plot_report(
@@ -251,8 +251,7 @@ class Test_report:
                     sample_name=sample_name,
                     test_name=test_name,
                     num_pag=num_1plot_pag,
-                    final_pag=final_pag,
-                    superposed=True
+                    final_pag=final_pag
                     )
                 pdf_file.savefig(fig_report)
                 num_1plot_pag += 1
@@ -364,7 +363,7 @@ class Panel_toughness_test_report(Test_report):
             x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
             comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
             )
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf_path=self.report_file)
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
 
