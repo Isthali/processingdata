@@ -73,11 +73,11 @@ def apply_header_footer_pdf(input_pdf_path, header_footer_pdf_path, output_pdf_p
         if page_width > page_height:
             # Si la página es landscape (paisaje), rotamos el encabezado y pie de página
             # Aplicar el encabezado y pie de página a la página del archivo original
-            page.merge_page(header_footer_page_land)
+            page.merge_page(header_footer_page_land, expand=True)
         else:
             # Si la página es landscape (paisaje), rotamos el encabezado y pie de página
             # Aplicar el encabezado y pie de página a la página del archivo original
-            page.merge_page(header_footer_page_port)
+            page.merge_page(header_footer_page_port, expand=True)
 
         # Agregar la página modificada al nuevo PDF
         pdf_writer.add_page(page)
