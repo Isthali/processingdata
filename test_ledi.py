@@ -392,7 +392,7 @@ class Axial_compression_test_report(Test_report):
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat')
+            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-D{id}/specimen.dat')
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
