@@ -131,9 +131,6 @@ class Toughness_mechanical_test(Mechanical_test):
             ])
         return self.defl_cps
 
-    def get_defl_cps(self):
-        return self.defl_cps
-
     def preprocess_data(self):
         super().get_max_load()
         super().make_positive_data()
@@ -326,7 +323,8 @@ class Panel_toughness_test_report(Test_report):
         """Escribe los resultados en un archivo Excel."""
         for i, test in enumerate(self.tests):
             row_start = 5 * i + 18  # Posición inicial de la fila para cada prueba
-            defl_cps = test.get_defl_cps()
+            defl_cps = test.set_defl_cps()
+            print(defl_cps)
             for j, (deflection, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])):
                 column = 4 + j
                 data = [load, deflection, toughness]
