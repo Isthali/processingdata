@@ -4,7 +4,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 
-def convert_excel_to_pdf(excel_path, pdf_path):
+def convert_excel_to_pdf(excel_path, pdf_path, pag_i, pag_f):
     try:
         excel = win32.Dispatch('Excel.Application')
         excel.Visible = False  # Opcional: No mostrar Excel durante la operación

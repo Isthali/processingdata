@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel
-from putformatPDF import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
+from edit_pdfs import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
 
 class Mechanical_test:
     def __init__(self):
@@ -355,7 +355,7 @@ class Panel_toughness_test_report(Test_report):
 
         self.add_tests()
         self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
         self.make_plot_report(
             x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
             comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
@@ -440,9 +440,10 @@ class Axial_compression_test_report(Test_report):
 
         self.add_tests()
         self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file)
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
         self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
+            comparative=comparative
             )
         merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
