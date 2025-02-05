@@ -121,7 +121,7 @@ class Toughness_mechanical_test(Mechanical_test):
             self.idx['iL'] = peaks[0]
         return self.idx['iL']
     
-    def set_defl_cps(self, defl_points=np.array([])):
+    def get_defl_cps(self, defl_points=np.array([])):
         loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
         toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
         idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
@@ -131,16 +131,16 @@ class Toughness_mechanical_test(Mechanical_test):
             ])
         return self.defl_cps
 
-    def preprocess_data(self):
+    def preprocess_data(self, defl_points=np.array([])):
         super().get_max_load()
         super().make_positive_data()
         self.get_toughness()
         self.get_first_peak()
-        self.set_defl_cps()
         imaxP = self.idx['maxLoad']
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
         self.idx['f'] = len(self.data)-1
         self.data_process = self.data.loc[self.idx['i']:, :]
+        self.get_defl_cps(defl_points)
         return self.idx
 
 class Axial_compression_test(Resistance_mechanical_test):
@@ -304,7 +304,7 @@ class Panel_toughness_test_report(Test_report):
             'EFNARC1996': [5., 10., 15., 20., 25., 30.],
             'EFNARC1999': [5., 10., 15., 20., 25., 30.]
         }
-        self.defl_points = np.array(standards_map.get(self.standard_test, []))
+        self.defl_points = np.array(standards_map[self.standard_test])
         if self.defl_points.size == 0:
             raise ValueError(f"Norma no reconocida: {self.standard_test}")
         return self.defl_points
@@ -316,15 +316,14 @@ class Panel_toughness_test_report(Test_report):
         for id in self.samples_id:
             test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder_path}Losa M{id}.xlsx')
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
-            test.preprocess_data()
+            test.preprocess_data(defl_points=self.defl_points)
             self.tests.append(test)
 
     def write_report(self):
         """Escribe los resultados en un archivo Excel."""
         for i, test in enumerate(self.tests):
             row_start = 5 * i + 18  # Posición inicial de la fila para cada prueba
-            defl_cps = test.set_defl_cps()
-            print(defl_cps)
+            defl_cps = test.defl_cps
             for j, (deflection, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])):
                 column = 4 + j
                 data = [load, deflection, toughness]
