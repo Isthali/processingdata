@@ -2,11 +2,11 @@ import os
 from test_ledi import Axial_compression_test_report
 
 # Parámetros iniciales
-infle = '300-24'
+infle = '018-25'
 subinfle = ''
 standar = 'CORES'
-empresa = 'VITAL'
-cores_id = [id+1 for id in range(10)]
+empresa = 'UNICON'
+cores_id = [id+1 for id in range(3)]
 
 # Directorios
 base_dir = f'C:/Users/joela/Documents/MATLAB/Diamantinas/{infle}/'

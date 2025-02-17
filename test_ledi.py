@@ -79,7 +79,8 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        ax.set_position([0.10, 0.15, 0.75, 0.75])
+        ax.set_position([0.10, 0.15, 0.65, 0.75])
+        #ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
@@ -314,7 +315,7 @@ class Panel_toughness_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder_path}Losa M{id}.xlsx')
+            test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder_path}Losa P{id}.xlsx')
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
             test.preprocess_data(defl_points=self.defl_points)
             self.tests.append(test)
@@ -335,7 +336,7 @@ class Panel_toughness_test_report(Test_report):
         header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_no_acreditado.pdf'
         x='Deflection'
         y='Load'
-        xlim=(0, 30)
+        xlim=(0, 50)
         ylim=(0, None)
         title='Fuerza-Deflexión'
         xlabel='Deflexión (mm)'
@@ -347,7 +348,7 @@ class Panel_toughness_test_report(Test_report):
 
         x_comp='Deflection'
         y_comp='Toughness'
-        xlim_comp=(0, 30)
+        xlim_comp=(0, 50)
         ylim_comp=(0, None)
         title_comp='Energía-Deflexión'
         xlabel_comp='Deflexión (mm)'
