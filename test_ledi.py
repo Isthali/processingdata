@@ -79,8 +79,8 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        ax.set_position([0.10, 0.15, 0.65, 0.75])
-        #ax.set_position([0.10, 0.15, 0.75, 0.75])
+        #ax.set_position([0.10, 0.15, 0.65, 0.75])
+        ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
@@ -332,11 +332,13 @@ class Panel_toughness_test_report(Test_report):
                     write_data_excel(file_path=self.excel_file, sheet_name='Resultados', position=(row_start + offset, column), val=value)
 
     def make_report_file(self):
+        self.add_tests()
+        
         """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_no_acreditado.pdf'
+        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
         x='Deflection'
         y='Load'
-        xlim=(0, 50)
+        xlim=(0, self.defl_points[-1])
         ylim=(0, None)
         title='Fuerza-Deflexión'
         xlabel='Deflexión (mm)'
@@ -345,22 +347,20 @@ class Panel_toughness_test_report(Test_report):
         test_name='ENSAYO DE TENACIDAD POR FLEXIÓN'
         num_1plot_pag=4
         comparative=True
-
         x_comp='Deflection'
         y_comp='Toughness'
-        xlim_comp=(0, 50)
+        xlim_comp=(0, self.defl_points[-1])
         ylim_comp=(0, None)
         title_comp='Energía-Deflexión'
         xlabel_comp='Deflexión (mm)'
         ylabel_comp='Energía (J)'       
-
-        self.add_tests()
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
         self.make_plot_report(
             x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
             comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
             )
+        
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
         merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
@@ -426,7 +426,7 @@ class Axial_compression_test_report(Test_report):
     
     def make_report_file(self):
         """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'C:/Users/joela/Documents/GitHub/processingdata/formato_acreditado.pdf'
+        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
         x='Displacement'
         y='Load'
         xlim=(0, None)

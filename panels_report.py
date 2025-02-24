@@ -2,11 +2,11 @@ import os
 from test_ledi import Panel_toughness_test_report
 
 # Parámetros iniciales
-infle = '030-25'
+infle = '026-25'
 subinfle = ''
-standar = 'ASTMC1550'
-empresa = 'MONOFILAMENTOS'
-panels_id = [id+1 for id in range(3)]
+standar = 'EFNARC1996'
+empresa = 'SIKA'
+panels_id = [id+1 for id in range(1)]
 
 # Directorios
 base_dir = f'C:/Users/joela/Documents/MATLAB/Losas/{infle}/'
