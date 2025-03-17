@@ -79,8 +79,8 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        #ax.set_position([0.10, 0.15, 0.65, 0.75])
-        ax.set_position([0.10, 0.15, 0.75, 0.75])
+        ax.set_position([0.10, 0.15, 0.65, 0.75])
+        #ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
@@ -397,32 +397,13 @@ class Axial_compression_test_report(Test_report):
     
     def write_report(self):
         for i, test in enumerate(self.tests):
-            row = i + 16
+            row = i+16
             column = 23
             write_data_excel(file_path=self.excel_file, sheet_name='Cores', position=(row, column), val=test.get_max_load())
             #column = 2
             #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_area_section(cell=(1, 1)))
             #column = 3
             #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_strength())
-
-    def plot_report(self):
-        with PdfPages(f'{self.plots_file}') as pdf_file:
-            for i, test in enumerate(self.tests):
-                is_final_page = (i == len(self.tests) - 1)
-                fig_test, _ = test.plot_data(
-                    x='Displacement',
-                    y='Load',
-                    title='Fuerza-Desplazamiento',
-                    xlabel='Desplazamiento (mm)',
-                    ylabel='Fuerza (kN)',
-                    legend=[f'CORE {test.get_sample_id()}'],
-                    infle=f"{self.repor_id['infle']}{self.repor_id['subinfle']}",
-                    test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN',
-                    num_pag=i+4,
-                    final_pag=is_final_page
-                )
-                pdf_file.savefig(fig_test)
-                plt.close()
     
     def make_report_file(self):
         """Genera el archivo de informe final."""
@@ -436,7 +417,7 @@ class Axial_compression_test_report(Test_report):
         ylabel='Fuerza (kN)'
         sample_name='CORE'
         test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN'
-        num_1plot_pag=4
+        num_1plot_pag=5
         comparative=False
 
         self.add_tests()
