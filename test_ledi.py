@@ -48,7 +48,7 @@ class Mechanical_test:
             raise ValueError("Error: load data before calculating the maximum load.")
         else:
             self.idx['minLoad'] = np.argmin(np.abs(self.data['Load'].to_numpy()))
-            self.maxLoad = np.min(self.data['Load'].to_numpy())
+            self.minLoad = np.min(self.data['Load'].to_numpy())
         return self.maxLoad
     
     def get_interp_data(self, x_name, y_name, x_new_values):
@@ -95,11 +95,11 @@ class Resistance_mechanical_test(Mechanical_test):
         self.idx = {'i': 0, 'f': 0, 'maxLoad': 0}
 
     def preprocess_data(self):
-        super().get_max_load()
         super().make_positive_data()
+        super().get_max_load()
         imaxP = self.idx['maxLoad']
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
-        self.idx['f'] = np.argmin(np.abs(self.data.loc[imaxP:, 'Load'].to_numpy() - 0.8 * self.maxLoad)) + imaxP
+        self.idx['f'] = np.argmin(np.abs(self.data.loc[imaxP:, 'Load'].to_numpy() - 0.75 * self.maxLoad)) + imaxP
         self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
         return self.idx
 
@@ -133,8 +133,8 @@ class Toughness_mechanical_test(Mechanical_test):
         return self.defl_cps
 
     def preprocess_data(self, defl_points=np.array([])):
-        super().get_max_load()
         super().make_positive_data()
+        super().get_max_load()
         self.get_toughness()
         self.get_first_peak()
         imaxP = self.idx['maxLoad']
@@ -390,7 +390,7 @@ class Axial_compression_test_report(Test_report):
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-D{id}/specimen.dat')
+            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat')
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
@@ -417,7 +417,7 @@ class Axial_compression_test_report(Test_report):
         ylabel='Fuerza (kN)'
         sample_name='CORE'
         test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN'
-        num_1plot_pag=5
+        num_1plot_pag=4
         comparative=False
 
         self.add_tests()
