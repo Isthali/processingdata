@@ -15,7 +15,7 @@ def import_data_text(file_path, delimiter, variable_names):
     encoding = detect_encoding(file_path)  # Detecta la codificación
     
     # Lectura de datos con pandas
-    df = pd.read_csv(filepath_or_buffer=file_path, sep=delimiter, names=variable_names, dtype=np.float64, skiprows=14, encoding=encoding)
+    df = pd.read_csv(filepath_or_buffer=file_path, sep=delimiter, names=variable_names, dtype=np.float64, skiprows=15, encoding=encoding)
     df = df.dropna()  # Omitir filas con errores de importación o vacías
     
     return df

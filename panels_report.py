@@ -2,10 +2,10 @@ import os
 from test_ledi import Panel_toughness_test_report
 
 # Parámetros iniciales
-infle = '070-25'
-subinfle = ''
+infle = '076-25'
+subinfle = '-A'
 standar = 'EFNARC1996'
-empresa = 'SIKA'
+empresa = 'INNOVA'
 panels_id = [id+1 for id in range(1)]
 
 # Directorios
