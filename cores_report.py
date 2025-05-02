@@ -2,10 +2,10 @@ import os
 from test_ledi import Axial_compression_test_report
 
 # Parámetros iniciales
-infle = '078-25'
+infle = '061-25'
 subinfle = ''
 standar = 'CORES'
-empresa = 'SOQUIMIC'
+empresa = 'BCP'
 cores_id = [id+1 for id in range(3)]
 
 # Directorios
