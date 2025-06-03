@@ -213,10 +213,18 @@ class Test_report:
         self.plots_file = 'plots_file'
         self.report_file = 'report_file'
 
-    def set_report_files(self):
-        self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.xlsm'
-        self.plots_file = f'{self.folder_path}plots.pdf'
-        self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.pdf'
+    def set_report_files(self, extension='xlsm'):
+        """Configura los nombres de los archivos de informe."""
+        if len(self.samples_id) == 0:
+            self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}.{extension}'
+            self.plots_file = f'{self.folder_path}plots.pdf'
+            self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}.pdf'
+        elif len(self.samples_id) > 0:
+            self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.{extension}'
+            self.plots_file = f'{self.folder_path}plots.pdf'
+            self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.pdf'
+        else:
+            raise ValueError("Error: No se han definido los identificadores de la prueba o de las muestras.")
         return self.excel_file, self.report_file
     
     def add_tests(self):
@@ -589,7 +597,7 @@ class Generate_test_report(Test_report):
         self.samples_id = samples_id
         self.tests = []
         self.defl_points = np.array([])
-        super().set_report_files()
+        super().set_report_files(extension='xlsx')
     
     def make_report_file(self):
         """Genera el archivo de informe final."""
