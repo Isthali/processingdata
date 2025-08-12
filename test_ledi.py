@@ -1,55 +1,88 @@
+"""Herramientas para procesar y generar reportes de ensayos mecánicos.
+
+Principales mejoras aplicadas respecto a la versión original:
+    - Corrección de errores de sintaxis en f-strings con diccionarios.
+    - Corrección de bug en get_min_load que devolvía maxLoad.
+    - Manejo seguro de parámetros mutables (listas) en constructores.
+    - Pequeñas validaciones y mensajes de advertencia.
+    - Tipos y docstrings breves para facilitar mantenimiento.
+    - Uso de pathlib para construir rutas (más robusto en Windows / Linux).
+"""
+
+from __future__ import annotations
+
 import numpy as np
 import scipy as sp
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from pathlib import Path
+from typing import Iterable, List, Sequence, Tuple, Union
+
 from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel
 from edit_pdfs import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
 
 class Mechanical_test:
+    """Clase base para ensayos mecánicos."""
+
     def __init__(self):
-        self.sample_id = 0
-        self.data = pd.DataFrame()
-        self.data_process = pd.DataFrame()
-        self.data_file = 'data_file'
-        self.maxLoad = 0
-        self.minLoad = 0
-        self.idx = {'minLoad': 0, 'maxLoad': 0}
+        self.sample_id: Union[int, str, None] = 0
+        self.data: pd.DataFrame = pd.DataFrame()
+        self.data_process: pd.DataFrame = pd.DataFrame()
+        self.data_file: Union[str, Path, None] = 'data_file'
+        self.maxLoad: float = 0.0
+        self.minLoad: float = 0.0
+        self.idx: dict = {'minLoad': 0, 'maxLoad': 0}
 
     def get_sample_id(self):
         return self.sample_id
     
-    def get_data(self, data_file, data_source, variable_names):
-        self.data_file = data_file    
+    def get_data(self, data_file: Union[str, Path], data_source: str, variable_names: Sequence[str]) -> pd.DataFrame:
+        """Carga datos desde archivo de texto (csv delimitado por tab) o excel.
+
+        Args:
+            data_file: Ruta al archivo.
+            data_source: 'csv' o 'xlsx'.
+            variable_names: nombres de columnas esperadas para asignar.
+        """
+        self.data_file = Path(data_file)
+        if not self.data_file.exists():
+            raise FileNotFoundError(f"Archivo no encontrado: {self.data_file}")
+
         if data_source == 'csv':
-            self.data = import_data_text(file_path=self.data_file, delimiter='\t', variable_names=variable_names)
+            self.data = import_data_text(file_path=str(self.data_file), delimiter='\t', variable_names=variable_names)
         elif data_source == 'xlsx':
-            self.data = import_data_excel(file_path=self.data_file, sheet_idx=0, variable_names=variable_names)
+            self.data = import_data_excel(file_path=str(self.data_file), sheet_idx=0, variable_names=variable_names)
         else:
-            print("Error: data_source not recognized.")
+            raise ValueError("Error: data_source no reconocido (use 'csv' o 'xlsx').")
+        if self.data.empty:
+            print("Advertencia: el DataFrame está vacío tras la importación.")
         return self.data
             
-    def make_positive_data(self, columns=None):
-        columns = columns or self.data.columns  # Procesa todas las columnas si no se especifica
+    def make_positive_data(self, columns: Sequence[str] | None = None) -> pd.DataFrame:
+        """Convierte columnas numéricas a su valor absoluto (útil cuando el sentido del sensor invierte signo)."""
+        if self.data.empty:
+            raise ValueError("No hay datos cargados para procesar.")
+        columns = list(columns) if columns is not None else list(self.data.columns)
         for col in columns:
-            self.data[col] = np.abs(self.data[col])
+            if col in self.data.columns:
+                self.data[col] = np.abs(self.data[col])
         return self.data
     
-    def get_max_load(self):
+    def get_max_load(self) -> float:
         if self.data.empty:
-            raise ValueError("Error: load data before calculating the maximum load.")
-        else:
-            self.idx['maxLoad'] = np.argmax(np.abs(self.data['Load'].to_numpy()))
-            self.maxLoad = np.max(self.data['Load'].to_numpy())
+            raise ValueError("Error: cargue datos antes de calcular la carga máxima.")
+        self.idx['maxLoad'] = int(np.argmax(np.abs(self.data['Load'].to_numpy())))
+        # Se usa el valor absoluto para consistencia con índice.
+        self.maxLoad = float(np.max(np.abs(self.data['Load'].to_numpy())))
         return self.maxLoad
     
-    def get_min_load(self):
+    def get_min_load(self) -> float:
         if self.data.empty:
-            raise ValueError("Error: load data before calculating the maximum load.")
-        else:
-            self.idx['minLoad'] = np.argmin(np.abs(self.data['Load'].to_numpy()))
-            self.minLoad = np.min(self.data['Load'].to_numpy())
-        return self.maxLoad
+            raise ValueError("Error: cargue datos antes de calcular la carga mínima.")
+        self.idx['minLoad'] = int(np.argmin(np.abs(self.data['Load'].to_numpy())))
+        self.minLoad = float(np.min(np.abs(self.data['Load'].to_numpy())))
+        return self.minLoad
     
     def get_interp_data(self, x_name, y_name, x_new_values):
         x = self.data[x_name].to_numpy()
@@ -82,9 +115,9 @@ class Mechanical_test:
         #ax.set_position([0.10, 0.15, 0.65, 0.75])
         ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
-        fig.text(0.05, 0.05, f'INF-LE {report_id}', fontsize=8, horizontalalignment='left')
-        fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
-        fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
+        fig.text(0.05, 0.05, f"INF-LE {report_id}", fontsize=8, horizontalalignment='left')
+        fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
+        fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')
         if final_pag:
             fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
         return fig, ax
@@ -215,16 +248,21 @@ class Test_report:
 
     def set_report_files(self, extension='xlsm'):
         """Configura los nombres de los archivos de informe."""
-        if len(self.samples_id) == 0:
-            self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}.{extension}'
-            self.plots_file = f'{self.folder_path}plots.pdf'
-            self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}.pdf'
-        elif len(self.samples_id) > 0:
-            self.excel_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.{extension}'
-            self.plots_file = f'{self.folder_path}plots.pdf'
-            self.report_file = f'{self.folder_path}INFLE_{self.repor_id['infle']}{self.repor_id['subinfle']}_{self.standard_test}_{self.client_id}_{len(self.samples_id)}.pdf'
+        infle = self.repor_id.get('infle', 'NA')
+        subinfle = self.repor_id.get('subinfle', '')
+        folder = Path(self.folder_path) if self.folder_path else Path('.')
+        folder.mkdir(parents=True, exist_ok=True)
+        n_samples = len(self.samples_id)
+        base = f"INFLE_{infle}{subinfle}_{self.standard_test}_{self.client_id}"
+        if n_samples == 0:
+            excel_name = f"{base}.{extension}"
+            pdf_name = f"{base}.pdf"
         else:
-            raise ValueError("Error: No se han definido los identificadores de la prueba o de las muestras.")
+            excel_name = f"{base}_{n_samples}.{extension}"
+            pdf_name = f"{base}_{n_samples}.pdf"
+        self.excel_file = str(folder / excel_name)
+        self.plots_file = str(folder / 'plots.pdf')
+        self.report_file = str(folder / pdf_name)
         return self.excel_file, self.report_file
     
     def add_tests(self):
@@ -250,9 +288,9 @@ class Test_report:
             ax.minorticks_on()
             ax.set_position([0.10, 0.15, 0.75, 0.75])
             # Texto adicional en el gráfico
-            fig.text(0.05, 0.05, f'INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}', fontsize=8, horizontalalignment='left')
-            fig.text(0.5, 0.05, f'LEDI-{test_name}', fontsize=8, horizontalalignment='center')
-            fig.text(0.85, 0.05, f'Pág. {num_pag}', fontsize=8, horizontalalignment='right')
+            fig.text(0.05, 0.05, f"INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}", fontsize=8, horizontalalignment='left')
+            fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
+            fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')
             if final_pag:
                 fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
             return fig, ax
@@ -343,13 +381,13 @@ class Panel_toughness_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
         super().__init__()
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
         self.folder_path = folder
         self.client_id = client_id
-        self.samples_id = samples_id
+        self.samples_id = samples_id or []
         self.tests = []
         self.defl_points = np.array([])
         super().set_report_files()
@@ -371,7 +409,7 @@ class Panel_toughness_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panels_toughness_test(sample_id=id, data_file=f'{self.folder_path}Losa P{id}.xlsx')
+            test = Panels_toughness_test(sample_id=id, data_file=f"{self.folder_path}Losa P{id}.xlsx")
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
             test.preprocess_data(defl_points=self.defl_points)
             self.tests.append(test)
@@ -433,13 +471,13 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
         super().__init__()
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
         self.folder_path = folder
         self.client_id = client_id
-        self.samples_id = samples_id
+        self.samples_id = samples_id or []
         self.tests = []
         self.defl_points = np.array([])
         super().set_report_files()
@@ -460,7 +498,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Beams_residual_strength_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-V-{id}/specimen.dat')
+            test = Beams_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-V-{id}/specimen.dat")
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'])
             test.preprocess_data(defl_points=self.defl_points)
             self.tests.append(test)
@@ -522,20 +560,20 @@ class Axial_compression_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
         super().__init__()
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
         self.folder_path = folder
         self.client_id = client_id
-        self.samples_id = samples_id
+        self.samples_id = samples_id or []
         self.tests = []
         self.defl_points = np.array([])
         super().set_report_files()
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Axial_compression_test(sample_id=id, data_file=f'{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat')
+            test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat")
             test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
@@ -588,13 +626,13 @@ class Generate_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=[]):
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
         super().__init__()
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
         self.folder_path = folder
         self.client_id = client_id
-        self.samples_id = samples_id
+        self.samples_id = samples_id or []
         self.tests = []
         self.defl_points = np.array([])
         super().set_report_files(extension='xlsx')
