@@ -84,7 +84,8 @@ class Mechanical_test:
         self.minLoad = float(np.min(np.abs(self.data['Load'].to_numpy())))
         return self.minLoad
     
-    def get_interp_data(self, x_name, y_name, x_new_values):
+    def get_interp_data(self, x_name: str, y_name: str, x_new_values: np.ndarray) -> np.ndarray:
+        """Interpola valores Y para nuevos valores X usando interpolación lineal."""
         x = self.data[x_name].to_numpy()
         y = self.data[y_name].to_numpy()
         y_new_values = np.interp(x_new_values, x, y)
@@ -112,7 +113,6 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        #ax.set_position([0.10, 0.15, 0.65, 0.75])
         ax.set_position([0.10, 0.15, 0.75, 0.75])
         # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f"INF-LE {report_id}", fontsize=8, horizontalalignment='left')
@@ -122,12 +122,19 @@ class Mechanical_test:
             fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
         return fig, ax
 
+    def close_figure(self, fig) -> None:
+        """Cierra figura para liberar memoria."""
+        plt.close(fig)
+
 class Resistance_mechanical_test(Mechanical_test):
+    """Ensayo mecánico de resistencia con procesamiento de datos hasta punto de caída."""
+    
     def __init__(self):
         super().__init__()
         self.idx = {'i': 0, 'f': 0, 'maxLoad': 0}
 
-    def preprocess_data(self):
+    def preprocess_data(self) -> dict:
+        """Preprocesa datos de resistencia: normaliza y define rango del 1% al 75% de carga máxima."""
         super().make_positive_data()
         super().get_max_load()
         imaxP = self.idx['maxLoad']
@@ -137,17 +144,21 @@ class Resistance_mechanical_test(Mechanical_test):
         return self.idx
 
 class Toughness_mechanical_test(Mechanical_test):
+    """Ensayo mecánico de tenacidad con cálculo de energía y detección de picos."""
+    
     def __init__(self):
         super().__init__()
         self.idx = {'i': 0, 'f': 0, 'iL':0, 'maxLoad': 0}
         self.defl_cps = pd.DataFrame()
 
-    def get_toughness(self):
+    def get_toughness(self) -> pd.Series:
+        """Calcula la tenacidad como integral acumulativa de fuerza vs deflexión."""
         toughness = sp.integrate.cumulative_trapezoid(y=self.data['Load'].to_numpy(), x=self.data['Deflection'].to_numpy(), initial=0)
         self.data['Toughness'] = toughness
         return self.data['Toughness']
     
-    def get_first_peak(self):
+    def get_first_peak(self) -> int:
+        """Detecta el primer pico significativo en la curva de carga."""
         peaks, _ = sp.signal.find_peaks(x=self.data['Load'].to_numpy(), height=0.1*self.maxLoad, prominence=0.1*self.maxLoad, width=10)
         if len(peaks) == 0 or peaks[0] > self.idx['maxLoad']:
             self.idx['iL'] = self.idx['maxLoad']
@@ -155,7 +166,10 @@ class Toughness_mechanical_test(Mechanical_test):
             self.idx['iL'] = peaks[0]
         return self.idx['iL']
     
-    def get_defl_cps(self, defl_points=np.array([])):
+    def get_defl_cps(self, defl_points: np.ndarray = None) -> pd.DataFrame:
+        """Obtiene puntos característicos de deflexión interpolando cargas y tenacidad."""
+        if defl_points is None:
+            defl_points = np.array([])
         loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
         toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
         idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
@@ -165,7 +179,10 @@ class Toughness_mechanical_test(Mechanical_test):
             ])
         return self.defl_cps
 
-    def preprocess_data(self, defl_points=np.array([])):
+    def preprocess_data(self, defl_points: np.ndarray = None) -> dict:
+        """Preprocesa datos de tenacidad: normaliza, calcula tenacidad y puntos característicos."""
+        if defl_points is None:
+            defl_points = np.array([])
         super().make_positive_data()
         super().get_max_load()
         self.get_toughness()
@@ -178,41 +195,61 @@ class Toughness_mechanical_test(Mechanical_test):
         return self.idx
 
 class Axial_compression_test(Resistance_mechanical_test):
-    def __init__(self, sample_id=None, data_file= None):
+    """Ensayo de compresión axial con cálculo de área de sección y resistencia."""
+    
+    def __init__(self, sample_id=None, data_file=None):
         super().__init__()
         self.sample_id = sample_id
         self.data_file = data_file
-        self.area_sec = 0
-        self.strength = 0
+        self.area_sec: float = 0.0
+        self.strength: float = 0.0
 
-    def get_area_section(self, length_sec=None, section_type=None):
-        if section_type=='circular':
-            self.area_sec = np.pi*(length_sec/2)**2
-        elif section_type=='square':
-            self.area_sec = length_sec**2
-        elif section_type=='rectangular':
-            self.area_sec = length_sec[0]*length_sec[1]
+    def get_area_section(self, length_sec: Union[float, List[float]], section_type: str) -> float:
+        """Calcula el área de la sección transversal según el tipo de geometría.
+        
+        Args:
+            length_sec: Para circular/cuadrada: diámetro/lado. Para rectangular: [ancho, alto].
+            section_type: 'circular', 'square', o 'rectangular'.
+        """
+        if section_type == 'circular':
+            self.area_sec = np.pi * (length_sec / 2) ** 2
+        elif section_type == 'square':
+            self.area_sec = length_sec ** 2
+        elif section_type == 'rectangular':
+            if not isinstance(length_sec, (list, tuple)) or len(length_sec) != 2:
+                raise ValueError("Para sección rectangular, length_sec debe ser [ancho, alto]")
+            self.area_sec = length_sec[0] * length_sec[1]
         else:
-            print("Error: no section type selected.")
+            raise ValueError(f"Tipo de sección no reconocido: {section_type}. Use 'circular', 'square', o 'rectangular'.")
         return self.area_sec
     
-    def get_strength(self):
-        self.strength = self.maxLoad/self.area_sec
+    def get_strength(self) -> float:
+        """Calcula la resistencia dividiendo carga máxima por área de sección."""
+        if self.area_sec <= 0:
+            raise ValueError("Área de sección debe ser calculada primero y mayor que 0.")
+        self.strength = self.maxLoad / self.area_sec
         return self.strength
     
 class Panels_toughness_test(Toughness_mechanical_test):
-    def __init__(self, sample_id=None, data_file= None):
+    """Ensayo de tenacidad específico para paneles."""
+    
+    def __init__(self, sample_id=None, data_file=None):
         super().__init__()
         self.sample_id = sample_id
         self.data_file = data_file
 
 class Beams_residual_strength_test(Toughness_mechanical_test):
-    def __init__(self, sample_id=None, data_file= None):
+    """Ensayo de resistencia residual específico para vigas, incluye medición CMOD."""
+    
+    def __init__(self, sample_id=None, data_file=None):
         super().__init__()
         self.sample_id = sample_id
         self.data_file = data_file
 
-    def get_defl_cps(self, defl_points=np.array([])):
+    def get_defl_cps(self, defl_points: np.ndarray = None) -> pd.DataFrame:
+        """Obtiene puntos característicos incluyendo CMOD para ensayos de vigas."""
+        if defl_points is None:
+            defl_points = np.array([])
         loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
         toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
         cmods = self.get_interp_data(x_name='Deflection', y_name='CMOD', x_new_values=defl_points)
@@ -573,8 +610,10 @@ class Axial_compression_test_report(Test_report):
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat")
-            test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
+            #test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat")
+            #test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
+            test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}.xlsx")
+            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
     
