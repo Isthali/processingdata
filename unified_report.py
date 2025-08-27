@@ -54,7 +54,7 @@ REPORT_CONFIGS = {
         'report_class': Panel_toughness_test_report,
         'description': 'Genera reporte de ensayos de tenacidad de paneles',
         'default_standard': 'EFNARC1996',
-        'standard_choices': ['EFNARC1996', 'EFNARC1999', 'ASTMC1550'],
+        'standard_choices': ['EFNARC1996', 'EFNARC1999', 'ASTMC1550', 'EN14488-5'],
         'default_client': 'PRODIMIN',
         'default_base': 'C:/Users/joela/Documents/MATLAB/Losas',
         'default_n': 3,

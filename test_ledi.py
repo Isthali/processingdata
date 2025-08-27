@@ -290,7 +290,10 @@ class Test_report:
         folder = Path(self.folder_path) if self.folder_path else Path('.')
         folder.mkdir(parents=True, exist_ok=True)
         n_samples = len(self.samples_id)
-        base = f"INFLE_{infle}{subinfle}_{self.standard_test}_{self.client_id}"
+        if subinfle == '':
+            base = f"INFLE_{infle}_{self.standard_test}_{self.client_id}"
+        else:
+            base = f"INFLE_{infle}_-{subinfle}_{self.standard_test}_{self.client_id}"
         if n_samples == 0:
             excel_name = f"{base}.{extension}"
             pdf_name = f"{base}.pdf"
@@ -434,7 +437,8 @@ class Panel_toughness_test_report(Test_report):
         standards_map = {
             'ASTMC1550': [5., 10., 20., 30., 40., 45.],
             'EFNARC1996': [5., 10., 15., 20., 25., 30.],
-            'EFNARC1999': [5., 10., 15., 20., 25., 30.]
+            'EFNARC1999': [5., 10., 15., 20., 25., 30.],
+            'EN14488-5': [5., 10., 15., 20., 25., 30.]
         }
         self.defl_points = np.array(standards_map[self.standard_test])
         if self.defl_points.size == 0:
