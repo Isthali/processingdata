@@ -40,7 +40,7 @@ python unified_report.py <tipo_ensayo> [opciones]
 ### Argumentos Comunes
 
 - `--infle`: **(Requerido)** Identificador del informe (ej: 336-24, 111-25)
-- `--subinfle`: Sub-identificador del informe (ej: -S, -C). Por defecto: vacío
+- `--subinfle`: Sub-identificador del informe (ej: S, C). Por defecto: vacío
 - `--standard`: Estándar del ensayo. Cada tipo tiene su valor por defecto
 - `--empresa`: Nombre de la empresa cliente. Por defecto según el tipo
 - `--base-dir`: Directorio base donde se generará el reporte
@@ -59,46 +59,46 @@ Los tipos `cores`, `panels`, y `panels_residual` admiten:
 
 ```bash
 # Configuración básica con valores por defecto
-python unified_report.py cores --infle 336-24 --subinfle -S
+python unified_report.py cores --infle 336-24 --subinfle S
 
 # Configuración personalizada
-python unified_report.py cores --infle 336-24 --subinfle -S --standard CORES --empresa "MI_EMPRESA" --n 8 --base-dir "D:/Reportes/Testigos"
+python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa "MI_EMPRESA" --n 8 --base-dir "D:/Reportes/Testigos"
 
 # Con salida verbose para diagnóstico
-python unified_report.py cores --infle 336-24 --subinfle -S --verbose
+python unified_report.py cores --infle 336-24 --subinfle S --verbose
 ```
 
 ### Ensayos de Tenacidad de Paneles
 
 ```bash
 # Configuración básica
-python unified_report.py panels --infle 111-25 --subinfle -C
+python unified_report.py panels --infle 111-25 --subinfle C
 
 # Con estándar específico
-python unified_report.py panels --infle 111-25 --subinfle -C --standard EFNARC1999 --n 5
+python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1999 --n 5
 
 # Configuración completa personalizada
-python unified_report.py panels --infle 111-25 --subinfle -C --standard ASTMC1550 --empresa "PRODIMIN" --n 6 --offset 3 --base-dir "D:/Reportes/Paneles"
+python unified_report.py panels --infle 111-25 --subinfle C --standard ASTMC1550 --empresa "PRODIMIN" --n 6 --offset 3 --base-dir "D:/Reportes/Paneles"
 ```
 
 ### Ensayos de Resistencia Residual
 
 ```bash
 # Configuración básica
-python unified_report.py panels_residual --infle 111-25 --subinfle -C
+python unified_report.py panels_residual --infle 111-25 --subinfle C
 
 # Configuración personalizada
-python unified_report.py panels_residual --infle 111-25 --subinfle -C --standard EN14488 --empresa "PRODIMIN" --n 4 --offset 7
+python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa "PRODIMIN" --n 4 --offset 7
 ```
 
 ### Conversión Genérica
 
 ```bash
 # Configuración básica
-python unified_report.py generic --infle 336-24 --subinfle -S
+python unified_report.py generic --infle 336-24 --subinfle S
 
 # Configuración personalizada
-python unified_report.py generic --infle 336-24 --subinfle -S --standard DM --empresa "EMPRESA_CLIENTE" --base-dir "D:/Reportes/Genericos"
+python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa "EMPRESA_CLIENTE" --base-dir "D:/Reportes/Genericos"
 ```
 
 ## Archivos de Salida
@@ -121,28 +121,28 @@ El script generará automáticamente:
 **cores_report.py** → `unified_report.py cores`
 ```bash
 # Antes
-python cores_report.py --infle 336-24 --subinfle -S --standard CORES --empresa PRODIMIN --n 6
+python cores_report.py --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
 
 # Ahora
-python unified_report.py cores --infle 336-24 --subinfle -S --standard CORES --empresa PRODIMIN --n 6
+python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
 ```
 
 **panels_report.py** → `unified_report.py panels`
 ```bash
 # Antes
-python panels_report.py --infle 111-25 --subinfle -C --standard EFNARC1996 --empresa PRODIMIN --n 3
+python panels_report.py --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
 
 # Ahora
-python unified_report.py panels --infle 111-25 --subinfle -C --standard EFNARC1996 --empresa PRODIMIN --n 3
+python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
 ```
 
 **gen_report.py** → `unified_report.py generic`
 ```bash
 # Antes
-python gen_report.py --infle 336-24 --subinfle -S --standard DM --empresa EXC
+python gen_report.py --infle 336-24 --subinfle S --standard DM --empresa EXC
 
 # Ahora
-python unified_report.py generic --infle 336-24 --subinfle -S --standard DM --empresa EXC
+python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa EXC
 ```
 
 ## Ventajas del Script Unificado

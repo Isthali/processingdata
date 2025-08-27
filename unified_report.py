@@ -8,16 +8,16 @@ Este script puede generar reportes para múltiples tipos de ensayos mecánicos:
 
 Ejemplos de uso:
     # Reporte de testigos de hormigón
-    python unified_report.py cores --infle 336-24 --subinfle -S --standard CORES --empresa PRODIMIN --n 6
+    python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
 
     # Reporte de tenacidad de paneles
-    python unified_report.py panels --infle 111-25 --subinfle -C --standard EFNARC1996 --empresa PRODIMIN --n 3
+    python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
 
     # Reporte de resistencia residual
-    python unified_report.py panels_residual --infle 111-25 --subinfle -C --standard EN14488 --empresa PRODIMIN --n 3
+    python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa PRODIMIN --n 3
 
     # Conversión genérica
-    python unified_report.py generic --infle 336-24 --subinfle -S --standard DM --empresa EXC
+    python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa EXC
 """
 
 from __future__ import annotations
@@ -170,7 +170,7 @@ def parse_arguments() -> argparse.Namespace:
         subparser.add_argument(
             '--subinfle',
             default='',
-            help='Sub-identificador del informe (ej: -S, -C)'
+            help='Sub-identificador del informe (ej: S, C)'
         )
         
         subparser.add_argument(
