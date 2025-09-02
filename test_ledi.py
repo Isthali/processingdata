@@ -50,7 +50,7 @@ class Mechanical_test:
             raise FileNotFoundError(f"Archivo no encontrado: {self.data_file}")
 
         if data_source == 'csv':
-            self.data = import_data_text(file_path=str(self.data_file), delimiter='\t', variable_names=variable_names)
+            self.data = import_data_text(file_path=str(self.data_file), delimiter='auto', variable_names=variable_names)
         elif data_source == 'xlsx':
             self.data = import_data_excel(file_path=str(self.data_file), sheet_idx=0, variable_names=variable_names)
         else:
@@ -293,7 +293,7 @@ class Test_report:
         if subinfle == '':
             base = f"INFLE_{infle}_{self.standard_test}_{self.client_id}"
         else:
-            base = f"INFLE_{infle}_-{subinfle}_{self.standard_test}_{self.client_id}"
+            base = f"INFLE_{infle}-{subinfle}_{self.standard_test}_{self.client_id}"
         if n_samples == 0:
             excel_name = f"{base}.{extension}"
             pdf_name = f"{base}.pdf"
@@ -539,8 +539,19 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Beams_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-V-{id}/specimen.dat")
-            test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'])
+            test = Beams_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
+            # Usar delimitador flexible por espacios/tabs y permitir auto detección de encabezado
+            test.data = import_data_text(
+                file_path=str(test.data_file),
+                delimiter='auto',
+                variable_names=['Time', 'Displacement', 'Load', 'Deflection', 'CMOD'],
+                # skiprows se auto-detectará
+                debug_sample=False,
+                auto_detect_header=True,
+                min_valid_cols=3,
+                warn_once=True,
+                audit_log_dir=f"{self.folder_path}audits"
+            )
             test.preprocess_data(defl_points=self.defl_points)
             self.tests.append(test)
 
@@ -549,9 +560,9 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         for i, test in enumerate(self.tests):
             row_start = i + 19  # Posición inicial de la fila para cada prueba
             defl_cps = test.defl_cps
-            for j, (deflection, cmod, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['CMOD'], defl_cps['Load'], defl_cps['Toughness'])):
+            for j, (load, deflection, cmod, toughness) in enumerate(zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['CMOD'], defl_cps['Toughness'])):
                 column = 20 + 4 * j
-                data = [load, deflection, cmod, toughness]
+                data = [1000*load, deflection, cmod, toughness]
                 for offset, value in enumerate(data):
                     write_data_excel(file_path=self.excel_file, sheet_name='ResistenciaResidual', position=(row_start, column + offset), val=value)
 

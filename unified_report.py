@@ -66,7 +66,7 @@ REPORT_CONFIGS = {
         'default_standard': 'EN14488',
         'standard_choices': None,
         'default_client': 'PRODIMIN',
-        'default_base': 'C:/Users/joela/Documents/MATLAB/Losas',
+        'default_base': 'C:/Users/joela/Documents/MATLAB/Vigas',
         'default_n': 3,
         'requires_samples': True,
     },

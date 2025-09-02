@@ -24,24 +24,35 @@ from typing import Iterable, List, Sequence, Tuple, Union, Any, Optional
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Handler solo si no existe
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+# Evitar duplicados: no agregar handler propio; delegar al root.
+root_logger = logging.getLogger()
+if logger.handlers:
+    logger.handlers.clear()
+logger.propagate = True
 
+# Opt-in to future pandas behavior to avoid FutureWarning about silent downcasting
+try:
+    pd.set_option('future.no_silent_downcasting', True)
+except Exception:
+    pass
 
+__all__ = [
+    'detect_encoding', 'import_data_text', 'import_data_excel', 'get_data_excel',
+    'write_data_excel', 'write_batch_excel', 'validate_excel_file'
+]
+
+_GLOBAL_CONVERSION_WARNING_EMITTED = False
 def detect_encoding(file_path: Union[str, Path], sample_size: int = 10000, default: str = 'utf-8') -> str:
-    """Detecta la codificación probable de un archivo binario.
+    """Detecta la codificación probable de un archivo de texto.
 
     Args:
         file_path: Ruta al archivo.
-        sample_size: Número de bytes a muestrear (debe ser > 0).
-        default: Codificación por defecto si chardet no determina.
+        sample_size: Bytes a leer para muestreo (>0).
+        default: Codificación a usar si no se detecta.
+
     Returns:
-        Cadena con la codificación detectada o la predeterminada.
-    
+        Encoding detectado o la codificación por defecto.
+
     Raises:
         FileNotFoundError: Si el archivo no existe.
         ValueError: Si sample_size <= 0.
@@ -77,74 +88,248 @@ def import_data_text(
     dtype: Any = np.float64,
     dropna: bool = True,
     max_retries: int = 2,
+    coerce_numeric: bool = True,
+    min_valid_cols: int = 2,
+    debug_sample: bool = False,
+    auto_detect_header: bool = True,
+    warn_once: bool = True,
+    audit_log_dir: Union[str, Path, None] = None,
+    audit_head: int = 5,
+    audit_tail: int = 5,
+    audit_mid: int = 5,
 ) -> pd.DataFrame:
-    """Importa datos desde archivo de texto delimitado.
+    """Importa datos de texto con estrategias robustas de limpieza y auditoría.
 
-    Args:
-        file_path: Ruta al archivo.
-        delimiter: Separador de columnas.
-        variable_names: Nombres de columnas a asignar.
-        skiprows: Filas a omitir al inicio.
-        dtype: Tipo de datos para conversión.
-        dropna: Eliminar filas con NaN.
-        max_retries: Número máximo de reintentos con diferentes encodings.
-    
-    Returns:
-        DataFrame con los datos importados.
-    
-    Example:
-        >>> df = import_data_text('data.txt', '\t', ['Time', 'Force'], skiprows=10)
+    Parámetros clave nuevos:
+      - auto_detect_header: intenta localizar la línea 'Running Time' y ajusta skiprows.
+      - coerce_numeric: fuerza limpieza y conversión numérica columna por columna.
+      - min_valid_cols: mínimo de columnas no NaN requerido para conservar una fila.
+      - warn_once: evita repetir el warning de conversión fallida.
+      - audit_log_dir: si se indica, guarda una muestra audit.csv (head/mid/tail) para trazabilidad.
     """
     if skiprows < 0:
         raise ValueError("skiprows debe ser >= 0")
     if not variable_names:
         raise ValueError("variable_names no puede estar vacío")
-    
+
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
-    
+
     logger.info(f"Importando datos de texto: {file_path}")
-    
+
     encodings_to_try = [detect_encoding(file_path), 'utf-8', 'latin-1', 'cp1252']
-    
+
+    # Detectar delimitador si se solicita
+    if delimiter == 'auto':
+        try:
+            with file_path.open('r', errors='ignore') as fh:
+                raw_lines = []
+                for _ in range(400):  # leer líneas suficientes para buscar encabezado y datos
+                    try:
+                        raw_lines.append(next(fh))
+                    except StopIteration:
+                        break
+        except Exception as e:
+            logger.debug(f"No se pudo leer para auto-delimiter: {e}")
+            raw_lines = []
+        # Intentar detectar encabezado preliminar antes de delimitar
+        header_index = None
+        for i, line in enumerate(raw_lines):
+            lw = line.lower()
+            if 'running time' in lw and 'displacement' in lw:
+                header_index = i
+                break
+        data_section = raw_lines[(header_index + 2) if header_index is not None else 0:]
+        candidate_delims = ['\t', ',', ';', '|']
+        # whitespace flexible se evalúa aparte
+        best_delim = '\t'
+        best_score = -1
+        expected_cols = len(variable_names)
+        sample = [ln for ln in data_section if ln.strip()][:50]
+        if sample:
+            for cand in candidate_delims:
+                good = 0
+                for ln in sample:
+                    parts = ln.strip().split(cand)
+                    if len(parts) == expected_cols:
+                        good += 1
+                score = good / len(sample)
+                if score > best_score:
+                    best_score = score
+                    best_delim = cand
+            # Probar whitespace si ninguno alcanza umbral >=0.5
+            if best_score < 0.5:
+                import re
+                good = 0
+                for ln in sample:
+                    parts = re.split(r'\s+', ln.strip())
+                    if len(parts) >= expected_cols:  # puede haber columnas extra de ruido
+                        good += 1
+                score_ws = good / len(sample)
+                if score_ws >= best_score:
+                    delimiter = r'\s+'
+                else:
+                    delimiter = best_delim
+            else:
+                delimiter = best_delim
+            delim_repr = repr(delimiter)
+            logger.info(f"Delimitador auto-detectado: {delim_repr} (score={best_score:.2f})")
+        else:
+            logger.debug("No se pudo muestrear líneas para detectar delimitador; se usará '\t'")
+            delimiter = '\t'
+
+    # Auto-detección de encabezado (ajusta skiprows)
+    if auto_detect_header:
+        try:
+            with file_path.open('r', errors='ignore') as fh:
+                preview = [next(fh) for _ in range(200)]
+        except StopIteration:
+            preview = []
+        except Exception as e:
+            logger.debug(f"No se pudo pre-escANear para encabezado: {e}")
+            preview = []
+        header_line = None
+        for i, line in enumerate(preview):
+            low = line.lower()
+            if 'running time' in low and ('displacement' in low):
+                header_line = i
+                break
+        if header_line is not None:
+            new_skip = header_line + 2  # línea títulos + unidades
+            if new_skip != skiprows:
+                logger.info(f"Auto-detección encabezado: skiprows {skiprows} -> {new_skip}")
+                skiprows = new_skip
+        else:
+            logger.debug("No se detectó encabezado; se mantiene skiprows proporcionado")
+
+    global _GLOBAL_CONVERSION_WARNING_EMITTED
+    warned_conversion = False
+    last_error: Optional[Exception] = None
+    df: pd.DataFrame | None = None
+
     for attempt, encoding in enumerate(encodings_to_try[:max_retries + 1]):
         try:
-            logger.debug(f"Intento {attempt + 1} con encoding: {encoding}")
-            df = pd.read_csv(
-                filepath_or_buffer=str(file_path),
-                sep=delimiter,
-                names=list(variable_names),
-                dtype=dtype,
-                skiprows=skiprows,
-                encoding=encoding,
-                engine='python',
-                on_bad_lines='skip'
-            )
-            
-            logger.info(f"Datos importados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas")
+            logger.debug(f"Intento {attempt+1} lectura (encoding={encoding})")
+            # Intento directo
+            try:
+                df = pd.read_csv(
+                    str(file_path),
+                    sep=delimiter if delimiter != '\\s+' else r'\s+',
+                    names=list(variable_names),
+                    usecols=range(len(variable_names)),
+                    dtype=dtype,
+                    skiprows=skiprows,
+                    encoding=encoding,
+                    engine='python',
+                    on_bad_lines='skip'
+                )
+            except ValueError as ve:
+                if coerce_numeric and 'Unable to convert column' in str(ve):
+                    col_problem = str(ve).split('column')[-1].strip()
+                    if (not warned_conversion) and (not _GLOBAL_CONVERSION_WARNING_EMITTED or not warn_once):
+                        logger.warning(f"Fallo conversión directa ({col_problem}). Reintentando con limpieza flexible.")
+                        _GLOBAL_CONVERSION_WARNING_EMITTED = True
+                    warned_conversion = True
+                    df = pd.read_csv(
+                        str(file_path),
+                        sep=delimiter if delimiter != '\\s+' else r'\s+',
+                        names=list(variable_names),
+                        usecols=range(len(variable_names)),
+                        dtype=str,
+                        skiprows=skiprows,
+                        encoding=encoding,
+                        engine='python',
+                        on_bad_lines='skip'
+                    )
+                    if debug_sample:
+                        logger.debug("Muestra cruda:\n" + '\n'.join(df.head(5).astype(str).agg('\t'.join, axis=1)))
+                    # Limpieza por columna
+                    for col in df.columns:
+                        series = (df[col].astype(str)
+                                      .str.strip()
+                                      .str.replace('\u00a0', ' ', regex=False)
+                                      .str.replace(',', '.', regex=False)
+                                      .str.replace(r'[^0-9eE+\-\.]+', '', regex=True)
+                                 )
+                        series = series.replace('', np.nan)
+                        df[col] = pd.to_numeric(series, errors='coerce')
+                else:
+                    raise
+            logger.info(f"Datos importados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas (encoding={encoding})")
             break
-            
         except (UnicodeDecodeError, UnicodeError) as e:
+            last_error = e
             if attempt == len(encodings_to_try) - 1:
-                logger.error(f"No se pudo decodificar el archivo después de {max_retries + 1} intentos")
-                raise RuntimeError(f"Error de encoding después de {max_retries + 1} intentos: {e}")
-            logger.warning(f"Error con encoding {encoding}, intentando siguiente: {e}")
+                logger.error(f"Error de encoding tras {attempt+1} intentos: {e}")
+                raise RuntimeError(f"Error de encoding: {e}")
+            logger.warning(f"Encoding fallido ({encoding}), probando siguiente")
             continue
         except Exception as e:
+            last_error = e
             logger.error(f"Error inesperado importando datos: {e}")
             raise
-    
+    if df is None:
+        raise RuntimeError(f"No se pudo importar el archivo. Último error: {last_error}")
+
+    # Fallback si todo NaN
+    if (df.isna().all(axis=1)).mean() == 1.0:
+        logger.warning("Todas las filas NaN tras coerción; intentando autodetección de separador")
+        try:
+            flex_df = pd.read_csv(
+                str(file_path),
+                sep=None,
+                names=list(variable_names),
+                usecols=range(len(variable_names)),
+                dtype=str,
+                skiprows=skiprows,
+                engine='python',
+                encoding=encodings_to_try[0],
+                on_bad_lines='skip'
+            )
+            for col in flex_df.columns:
+                s = (flex_df[col].astype(str).str.strip().str.replace('\u00a0',' ',regex=False)
+                     .str.replace(',', '.', regex=False))
+                flex_df[col] = pd.to_numeric(s.replace('', np.nan), errors='coerce')
+            if (~flex_df.isna().all(axis=1)).any():
+                df = flex_df
+                logger.info("Fallback flexible exitoso")
+        except Exception as fe:
+            logger.error(f"Fallback flexible falló: {fe}")
+
+    # Filtrado de filas
     if dropna:
-        initial_rows = len(df)
-        df = df.dropna()
-        dropped_rows = initial_rows - len(df)
-        if dropped_rows > 0:
-            logger.info(f"Eliminadas {dropped_rows} filas con valores NaN")
-    
+        initial = len(df)
+        df = df.dropna(how='all')
+        valid_counts = df.notna().sum(axis=1)
+        df = df[valid_counts >= min_valid_cols]
+        removed = initial - len(df)
+        if removed > 0:
+            retention = (len(df) / initial * 100.0) if initial else 0.0
+            logger.info(f"Filtrado de filas: eliminadas {removed} (criterio: all-NaN o < {min_valid_cols} válidas) | Retención: {retention:.2f}% ({len(df)}/{initial})")
+
+    # Auditoría
+    if audit_log_dir and not df.empty:
+        try:
+            audit_dir = Path(audit_log_dir)
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            n = len(df)
+            sample_idx = []
+            sample_idx.extend(df.index[:audit_head].tolist())
+            if n > (audit_head + audit_tail):
+                mid_start = max(0, n//2 - audit_mid//2)
+                sample_idx.extend(df.index[mid_start: mid_start + audit_mid].tolist())
+            sample_idx.extend(df.index[-audit_tail:].tolist())
+            sample_idx = sorted(set(sample_idx))
+            audit_df = df.loc[sample_idx]
+            out_path = audit_dir / f"{file_path.stem}.audit.csv"
+            audit_df.to_csv(out_path, index=False)
+            logger.debug(f"Auditoría guardada: {out_path}")
+        except Exception as ae:
+            logger.debug(f"Auditoría no generada: {ae}")
+
     if df.empty:
         logger.warning("DataFrame resultante está vacío")
-    
     return df
 
 
@@ -155,6 +340,8 @@ def import_data_excel(
     skiprows: int = 49,
     dtype: Any = np.float64,
     dropna: bool = True,
+    auto_detect_header: bool = True,
+    header_search_rows: int = 100,
 ) -> pd.DataFrame:
     """Importa datos desde una hoja de Excel.
 
@@ -182,7 +369,35 @@ def import_data_excel(
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
     
     logger.info(f"Importando datos de Excel: {file_path}, hoja: {sheet_idx}")
-    
+
+    # Auto detección de fila inicial basada en coincidencia de nombres o patrón numérico
+    if auto_detect_header:
+        try:
+            wb = xl.load_workbook(filename=str(file_path), read_only=True, data_only=True)
+            if isinstance(sheet_idx, int):
+                ws = wb.worksheets[sheet_idx]
+            else:
+                ws = wb[sheet_idx]
+            target = [v.lower() for v in variable_names]
+            header_candidate = None
+            for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=header_search_rows, values_only=True), start=1):
+                values = [str(v).strip().lower() for v in row if v is not None]
+                if not values:
+                    continue
+                match_count = sum(1 for t in target if t in values)
+                if match_count >= max(2, int(0.6 * len(target))):
+                    # Asumimos siguiente fila son datos -> skip esa fila
+                    header_candidate = r_idx
+                    break
+            if header_candidate is not None:
+                new_skip = header_candidate
+                if new_skip != skiprows:
+                    logger.info(f"Auto-detección header Excel: skiprows {skiprows} -> {new_skip}")
+                    skiprows = new_skip
+            wb.close()
+        except Exception as e:
+            logger.debug(f"No se pudo auto-detectar header Excel: {e}")
+
     try:
         df = pd.read_excel(
             io=str(file_path),
@@ -192,9 +407,7 @@ def import_data_excel(
             skiprows=skiprows,
             engine='openpyxl'
         )
-        
         logger.info(f"Datos importados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas")
-        
     except ValueError as e:
         if "Worksheet" in str(e):
             raise ValueError(f"La hoja '{sheet_idx}' no existe en el archivo Excel")
