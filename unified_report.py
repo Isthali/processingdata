@@ -4,6 +4,7 @@ Este script puede generar reportes para múltiples tipos de ensayos mecánicos:
 - cores: Ensayos de compresión axial (testigos de hormigón)
 - panels: Ensayos de tenacidad de paneles
 - panels_residual: Ensayos de resistencia residual de paneles/vigas
+- tapas: Ensayos de flexión de tapas de buzón (tránsito)
 - generic: Conversión genérica Excel -> PDF
 
 Ejemplos de uso:
@@ -15,6 +16,9 @@ Ejemplos de uso:
 
     # Reporte de resistencia residual
     python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa PRODIMIN --n 3
+
+    # Reporte de flexión de tapas de buzón
+    python unified_report.py tapas --infle 222-25 --subinfle A --standard NTP339.111 --empresa PRODIMIN --n 3
 
     # Conversión genérica
     python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa EXC
@@ -32,6 +36,7 @@ from test_ledi import (
     Axial_compression_test_report,
     Panel_toughness_test_report,
     Panel_Beam_residual_strength_test_report,
+    Tapa_buzon_flexion_test_report,
     Generate_test_report,
     Test_report
 )
@@ -46,7 +51,7 @@ REPORT_CONFIGS = {
         'default_standard': 'CORES',
         'standard_choices': None,
         'default_client': 'PRODIMIN',
-        'default_base': 'C:/Users/joela/Documents/MATLAB/Diamantinas',
+        'default_base': 'D:/',
         'default_n': 6,
         'requires_samples': True,
     },
@@ -56,7 +61,7 @@ REPORT_CONFIGS = {
         'default_standard': 'EFNARC1996',
         'standard_choices': ['EFNARC1996', 'EFNARC1999', 'ASTMC1550', 'EN14488-5'],
         'default_client': 'PRODIMIN',
-        'default_base': 'C:/Users/joela/Documents/MATLAB/Losas',
+        'default_base': 'D:/',
         'default_n': 3,
         'requires_samples': True,
     },
@@ -66,7 +71,17 @@ REPORT_CONFIGS = {
         'default_standard': 'EN14488',
         'standard_choices': None,
         'default_client': 'PRODIMIN',
-        'default_base': 'C:/Users/joela/Documents/MATLAB/Vigas',
+        'default_base': 'D:/',
+        'default_n': 3,
+        'requires_samples': True,
+    },
+    'tapas': {
+        'report_class': Tapa_buzon_flexion_test_report,
+        'description': 'Genera reporte de ensayos de flexión de tapas de buzón (tránsito)',
+        'default_standard': 'Tapa_Circular_CA',
+        'standard_choices': None,
+        'default_client': 'PRODIMIN',
+        'default_base': 'D:/',
         'default_n': 3,
         'requires_samples': True,
     },
@@ -76,7 +91,7 @@ REPORT_CONFIGS = {
         'default_standard': 'DM',
         'standard_choices': None,
         'default_client': 'EMPRESA',
-        'default_base': 'C:/Users/joela/Documents/MATLAB/Diamantinas',
+        'default_base': 'D:/',
         'default_n': 0,
         'requires_samples': False,
     },

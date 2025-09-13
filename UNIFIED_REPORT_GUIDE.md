@@ -9,26 +9,32 @@ El script `unified_report.py` combina la funcionalidad de todos los scripts de g
 ### 1. `cores` - Ensayos de Compresión Axial (Testigos)
 - **Clase de reporte**: `Axial_compression_test_report`
 - **Estándar por defecto**: CORES
-- **Directorio base por defecto**: `C:/Users/joela/Documents/MATLAB/Diamantinas`
+- **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 6
 
 ### 2. `panels` - Ensayos de Tenacidad de Paneles
 - **Clase de reporte**: `Panel_toughness_test_report`
 - **Estándar por defecto**: EFNARC1996
 - **Estándares disponibles**: EFNARC1996, EFNARC1999, ASTMC1550
-- **Directorio base por defecto**: `C:/Users/joela/Documents/MATLAB/Losas`
+- **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 3
 
 ### 3. `panels_residual` - Ensayos de Resistencia Residual
 - **Clase de reporte**: `Panel_Beam_residual_strength_test_report`
 - **Estándar por defecto**: EN14488
-- **Directorio base por defecto**: `C:/Users/joela/Documents/MATLAB/Losas`
+- **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 3
 
-### 4. `generic` - Conversión Genérica Excel → PDF
+### 4. `tapas` - Ensayos de Flexión de Tapas de Buzón (Tránsito)
+- **Clase de reporte**: `Tapa_buzon_flexion_test_report`
+- **Estándar por defecto**: NTP339.111
+- **Directorio base por defecto**: `D:/`
+- **Número de muestras por defecto**: 3
+
+### 5. `generic` - Conversión Genérica Excel → PDF
 - **Clase de reporte**: `Generate_test_report`
 - **Estándar por defecto**: DM
-- **Directorio base por defecto**: `C:/Users/joela/Documents/MATLAB/Diamantinas`
+- **Directorio base por defecto**: `D:/`
 - **Sin muestras específicas** (n=0)
 
 ## Sintaxis de Uso
@@ -89,6 +95,16 @@ python unified_report.py panels_residual --infle 111-25 --subinfle C
 
 # Configuración personalizada
 python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa "PRODIMIN" --n 4 --offset 7
+```
+
+### Ensayos de Flexión de Tapas de Buzón (Tránsito)
+
+```bash
+# Configuración básica
+python unified_report.py tapas --infle 245-25 --subinfle A --empresa "FADECO" --n 6
+
+# Configuración personalizada
+python unified_report.py tapas --infle 222-25 --subinfle A --standard Tapa_Circular_CA --empresa "PRODIMIN" --n 3 --base-dir "D:/Reportes/Tapas"
 ```
 
 ### Conversión Genérica

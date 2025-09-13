@@ -260,6 +260,36 @@ class Beams_residual_strength_test(Toughness_mechanical_test):
             ])
         return self.defl_cps
 
+class Tapa_buzon_flexion_test(Resistance_mechanical_test):
+    """Ensayo de flexion de tapas para buzones."""
+    
+    def __init__(self, sample_id=None, data_file=None, umbral_kN: float = 120.0):
+        super().__init__()
+        self.sample_id = sample_id
+        self.data_file = data_file
+        # Umbral de cumplimiento (kN) – por norma NTP 339.111: 120 kN por defecto
+        self.umbral_kN: float = float(umbral_kN)
+        self.resultado: str = ''
+
+    def set_umbral(self, valor_kN: float) -> None:
+        """Permite ajustar el umbral de cumplimiento (kN)."""
+        self.umbral_kN = float(valor_kN)
+
+    def get_resultado(self) -> str:
+        """Devuelve 'Cumple' si maxLoad ≥ umbral, 'No cumple' si < umbral, o 'Sin datos' si no hay datos."""
+
+        self.resultado = 'Cumple' if self.maxLoad >= self.umbral_kN else 'No cumple'
+        return self.resultado
+
+    def get_resumen(self) -> dict:
+        """Pequeño resumen útil para reportes o depuración."""
+        return {
+            'sample_id': self.sample_id,
+            'maxLoad_kN': self.maxLoad,
+            'umbral_kN': self.umbral_kN,
+            'resultado': self.resultado or self.get_resultado()
+        }
+
 class Test_report:
     """
     Clase para generar informes.
@@ -327,6 +357,7 @@ class Test_report:
             ax.grid(visible=True, which='both', linestyle='--')
             ax.minorticks_on()
             ax.set_position([0.10, 0.15, 0.75, 0.75])
+            # ax.set_position([0.10, 0.15, 0.65, 0.75])
             # Texto adicional en el gráfico
             fig.text(0.05, 0.05, f"INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}", fontsize=8, horizontalalignment='left')
             fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
@@ -620,7 +651,6 @@ class Axial_compression_test_report(Test_report):
         self.client_id = client_id
         self.samples_id = samples_id or []
         self.tests = []
-        self.defl_points = np.array([])
         super().set_report_files()
 
     def add_tests(self):
@@ -668,6 +698,67 @@ class Axial_compression_test_report(Test_report):
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
 
+class Tapa_buzon_flexion_test_report(Test_report):
+    """
+    Clase para generar informes de pruebas de flexion en tapas de buzon.
+
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
+        super().__init__()
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = samples_id or []
+        self.tests = []
+        super().set_report_files()
+
+    def add_tests(self):
+        for id in self.samples_id:
+            test = Tapa_buzon_flexion_test(sample_id=id, data_file=f"{self.folder_path}tapas_{id}.xlsx")
+            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load'])
+            test.preprocess_data()
+            self.tests.append(test)
+    
+    def write_report(self):
+        for i, test in enumerate(self.tests):
+            row = 3*i+26
+            column = 17
+            write_data_excel(file_path=self.excel_file, sheet_name='Tapa C°A°', position=(row, column), val=test.get_max_load())
+    
+    def make_report_file(self):
+        """Genera el archivo de informe final."""
+        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
+        x='Time'
+        y='Load'
+        xlim=(0, None)
+        ylim=(0, None)
+        title='Fuerza'
+        xlabel='Tiempo (seg)'
+        ylabel='Fuerza (kN)'
+        sample_name='TAPA'
+        test_name='ENSAYO DE RESISTENCIA AL TRÁNSITO'
+        num_1plot_pag=4
+        comparative=False
+
+        self.add_tests()
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
+        self.make_plot_report(
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
+            comparative=comparative
+            )
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
+        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
+        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+
 class Generate_test_report(Test_report):
     """
     Clase para generar informes de pruebas de tenacidad en paneles.
@@ -688,7 +779,6 @@ class Generate_test_report(Test_report):
         self.client_id = client_id
         self.samples_id = samples_id or []
         self.tests = []
-        self.defl_points = np.array([])
         super().set_report_files(extension='xlsx')
     
     def make_report_file(self):
