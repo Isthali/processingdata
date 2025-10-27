@@ -159,28 +159,73 @@ class Toughness_mechanical_test(Mechanical_test):
     
     def get_first_peak(self) -> int:
         """Detecta el primer pico significativo en la curva de carga."""
-        peaks, _ = sp.signal.find_peaks(x=self.data['Load'].to_numpy(), height=0.1*self.maxLoad, prominence=0.1*self.maxLoad, width=10)
+        peaks, _ = sp.signal.find_peaks(x=self.data['Load'].to_numpy(), height=0.5*self.maxLoad, prominence=0.05*self.maxLoad, width=10)
         if len(peaks) == 0 or peaks[0] > self.idx['maxLoad']:
             self.idx['iL'] = self.idx['maxLoad']
         else:
             self.idx['iL'] = peaks[0]
         return self.idx['iL']
     
-    def get_defl_cps(self, defl_points: np.ndarray = None) -> pd.DataFrame:
-        """Obtiene puntos característicos de deflexión interpolando cargas y tenacidad."""
-        if defl_points is None:
-            defl_points = np.array([])
-        loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
-        toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
+    def get_defl_cps(
+        self,
+        x_points: np.ndarray | None = None,
+        x_col: str = 'Deflection',
+        include_extra_cols: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Calcula puntos característicos interpolando respecto a una columna x elegida.
+
+        Args:
+            x_points: Puntos del eje x (en unidades de ``x_col``) donde evaluar.
+            x_col: Columna a usar como eje x para la interpolación (por ejemplo, 'Deflection' o 'CMOD').
+            include_extra_cols: Columnas adicionales a incluir (si existen), además de ['Load', 'Toughness'] y ``x_col``.
+
+        Returns:
+            DataFrame con filas en los índices característicos [iL, maxLoad, f] y filas interpoladas en ``x_points``.
+        """
+        if x_points is None:
+            x_points = np.array([])
+
+        if x_col not in self.data.columns:
+            raise ValueError(f"Columna x '{x_col}' no existe en los datos. Disponibles: {self.data.columns.tolist()}")
+
+        base_cols = ['Load', 'Toughness']
+        extra = list(include_extra_cols) if include_extra_cols else []
+        cols_to_interp: List[str] = []
+        for c in base_cols + extra:
+            if c != x_col and c not in cols_to_interp and c in self.data.columns:
+                cols_to_interp.append(c)
+
+        # Interpolaciones respecto a x_col
+        interp_dict = {x_col: x_points}
+        for c in cols_to_interp:
+            interp_dict[c] = self.get_interp_data(x_name=x_col, y_name=c, x_new_values=x_points)
+        df_interp = pd.DataFrame(interp_dict)
+
+        # Filas en índices singulares (iL, maxLoad, f)
         idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
-        self.defl_cps = pd.concat([
-            self.data.loc[idx, ['Deflection', 'Load', 'Toughness']],
-            pd.DataFrame({'Deflection': defl_points, 'Load': loads, 'Toughness': toughness})
-            ])
+        keep_cols = [x_col] + cols_to_interp
+        existing = self.data.loc[idx, [col for col in keep_cols if col in self.data.columns]].copy()
+        for c in keep_cols:
+            if c not in existing.columns:
+                existing[c] = np.nan
+        existing = existing[keep_cols]
+
+        self.defl_cps = pd.concat([existing, df_interp], ignore_index=True)
         return self.defl_cps
 
-    def preprocess_data(self, defl_points: np.ndarray = None) -> dict:
-        """Preprocesa datos de tenacidad: normaliza, calcula tenacidad y puntos característicos."""
+    def preprocess_data(
+        self,
+        defl_points: np.ndarray | None = None,
+        x_col: str = 'Deflection',
+        include_extra_cols: Sequence[str] | None = None,
+    ) -> dict:
+        """Preprocesa datos de tenacidad: normaliza, calcula tenacidad y puntos característicos.
+
+        Args:
+            defl_points: Puntos del eje x (en unidades de ``x_col``) donde evaluar cps.
+            x_col: Columna a usar como eje x para interpolar ('Deflection' o 'CMOD', según ensayo).
+            include_extra_cols: Columnas adicionales a devolver en cps (si existen en datos).
+        """
         if defl_points is None:
             defl_points = np.array([])
         super().make_positive_data()
@@ -191,7 +236,7 @@ class Toughness_mechanical_test(Mechanical_test):
         self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
         self.idx['f'] = len(self.data)-1
         self.data_process = self.data.loc[self.idx['i']:, :]
-        self.get_defl_cps(defl_points)
+        self.get_defl_cps(x_points=defl_points, x_col=x_col, include_extra_cols=include_extra_cols)
         return self.idx
 
 class Axial_compression_test(Resistance_mechanical_test):
@@ -238,27 +283,35 @@ class Panels_toughness_test(Toughness_mechanical_test):
         self.sample_id = sample_id
         self.data_file = data_file
 
-class Beams_residual_strength_test(Toughness_mechanical_test):
-    """Ensayo de resistencia residual específico para vigas, incluye medición CMOD."""
+class Panel_Beam_residual_strength_test(Toughness_mechanical_test):
+    """Ensayo de resistencia residual específico para vigas y paneles, incluye medición CMOD."""
     
     def __init__(self, sample_id=None, data_file=None):
         super().__init__()
         self.sample_id = sample_id
         self.data_file = data_file
 
-    def get_defl_cps(self, defl_points: np.ndarray = None) -> pd.DataFrame:
-        """Obtiene puntos característicos incluyendo CMOD para ensayos de vigas."""
-        if defl_points is None:
-            defl_points = np.array([])
-        loads = self.get_interp_data(x_name='Deflection', y_name='Load', x_new_values=defl_points)
-        toughness = self.get_interp_data(x_name='Deflection', y_name='Toughness', x_new_values=defl_points)
-        cmods = self.get_interp_data(x_name='Deflection', y_name='CMOD', x_new_values=defl_points)
-        idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
-        self.defl_cps = pd.concat([
-            self.data.loc[idx, ['Deflection', 'CMOD', 'Load', 'Toughness']],
-            pd.DataFrame({'Deflection': defl_points, 'CMOD': cmods, 'Load': loads, 'Toughness': toughness})
-            ])
-        return self.defl_cps
+    def get_defl_cps(
+        self,
+        x_points: np.ndarray | None = None,
+        x_col: str = 'CMOD',
+        include_extra_cols: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Obtiene puntos característicos para vigas y paneles, permitiendo elegir el eje x (por defecto 'CMOD')."""
+        extra_cols = list(include_extra_cols) if include_extra_cols else []
+        if x_col.lower() == 'cmod' and 'Deflection' not in extra_cols:
+            extra_cols.append('Deflection')
+        if x_col.lower() == 'deflection' and 'CMOD' not in extra_cols:
+            extra_cols.append('CMOD')
+        return super().get_defl_cps(x_points=x_points, x_col=x_col, include_extra_cols=extra_cols)
+
+class Beam_residual_strength_test(Toughness_mechanical_test):
+    """Ensayo de tenacidad específico para vigas."""
+    
+    def __init__(self, sample_id=None, data_file=None):
+        super().__init__()
+        self.sample_id = sample_id
+        self.data_file = data_file
 
 class Tapa_buzon_flexion_test(Resistance_mechanical_test):
     """Ensayo de flexion de tapas para buzones."""
@@ -471,7 +524,7 @@ class Panel_toughness_test_report(Test_report):
             'EFNARC1999': [5., 10., 15., 20., 25., 30.],
             'EN14488-5': [5., 10., 15., 20., 25., 30.]
         }
-        self.defl_points = np.array(standards_map[self.standard_test])
+        self.defl_points = np.array(standards_map.get(self.standard_test, []))
         if self.defl_points.size == 0:
             raise ValueError(f"Norma no reconocida: {self.standard_test}")
         return self.defl_points
@@ -483,7 +536,8 @@ class Panel_toughness_test_report(Test_report):
         for id in self.samples_id:
             test = Panels_toughness_test(sample_id=id, data_file=f"{self.folder_path}Losa P{id}.xlsx")
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
-            test.preprocess_data(defl_points=self.defl_points)
+            # Para tenacidad según ASTM C1550/EFNARC/EN 14488-5, los puntos se definen en deflexión
+            test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
     def write_report(self):
@@ -533,7 +587,7 @@ class Panel_toughness_test_report(Test_report):
 
 class Panel_Beam_residual_strength_test_report(Test_report):
     """
-    Clase para generar informes de pruebas de tenacidad en paneles.
+    Clase para generar informes de pruebas de resistencia residual en vigas y paneles con CMOD.
 
     Atributos:
         infle (str): Identificador de la prueba.
@@ -560,7 +614,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
             'EN14651': [0.5, 1.5, 2.5, 3.5, 4.],
             'EN14488': [0.5, 1.5, 2.5, 3.5, 4., 5.]
         }
-        self.defl_points = np.array(standards_map[self.standard_test])
+        self.defl_points = np.array(standards_map.get(self.standard_test, []))
         if self.defl_points.size == 0:
             raise ValueError(f"Norma no reconocida: {self.standard_test}")
         return self.defl_points
@@ -570,7 +624,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Beams_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
+            test = Panel_Beam_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
             # Usar delimitador flexible por espacios/tabs y permitir auto detección de encabezado
             test.data = import_data_text(
                 file_path=str(test.data_file),
@@ -583,7 +637,8 @@ class Panel_Beam_residual_strength_test_report(Test_report):
                 warn_once=True,
                 audit_log_dir=f"{self.folder_path}audits"
             )
-            test.preprocess_data(defl_points=self.defl_points)
+            # Para resistencia residual según EN 14651/EN 14488, los puntos se definen en CMOD
+            test.preprocess_data(defl_points=self.defl_points, x_col='CMOD', include_extra_cols=['Deflection'])
             self.tests.append(test)
 
     def write_report(self):
@@ -612,6 +667,106 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         sample_name='VIGA'
         test_name='ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN'
         num_1plot_pag=5
+        comparative=True
+        x_comp='Deflection'
+        y_comp='Toughness'
+        xlim_comp=(0, self.defl_points[-1])
+        ylim_comp=(0, None)
+        title_comp='Energía-Deflexión'
+        xlabel_comp='Deflexión (mm)'
+        ylabel_comp='Energía (J)'       
+        self.make_plot_report(
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
+            comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
+            )
+        
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
+        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
+        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+
+class Beam_residual_strength_test_report(Test_report):
+    """
+    Clase para generar informes de pruebas de resistencia residual en vigas.
+
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
+        super().__init__()
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = samples_id or []
+        self.tests = []
+        self.defl_points = np.array([])
+        super().set_report_files()
+    
+    def set_defl_points(self):
+        """Configura los puntos de deflexión según la norma."""
+        standards_map = {
+            'ASTMC1609': [0.75, 3.]
+        }
+        self.defl_points = np.array(standards_map.get(self.standard_test, []))
+        if self.defl_points.size == 0:
+            raise ValueError(f"Norma no reconocida: {self.standard_test}")
+        return self.defl_points
+
+    def add_tests(self):
+        """Agrega pruebas basadas en los identificadores de muestras."""
+        self.set_defl_points()
+
+        for id in self.samples_id:
+            test = Beam_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
+            # Usar delimitador flexible por espacios/tabs y permitir auto detección de encabezado
+            test.data = import_data_text(
+                file_path=str(test.data_file),
+                delimiter='auto',
+                variable_names=['Time', 'Displacement', 'Load', 'Deflection', 'Deflection2'],
+                # skiprows se auto-detectará
+                debug_sample=False,
+                auto_detect_header=True,
+                min_valid_cols=3,
+                warn_once=True,
+                audit_log_dir=f"{self.folder_path}audits"
+            )
+            # Para resistencia residual según EN 14651/EN 14488, los puntos se definen en CMOD
+            test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
+            self.tests.append(test)
+
+    def write_report(self):
+        """Escribe los resultados en un archivo Excel."""
+        for i, test in enumerate(self.tests):
+            row_start = i + 19  # Posición inicial de la fila para cada prueba
+            defl_cps = test.defl_cps
+            for j, (load, deflection, toughness) in enumerate(zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['Toughness'])):
+                column = 21 + 3 * j
+                data = [1000*load, deflection, toughness]
+                for offset, value in enumerate(data):
+                    write_data_excel(file_path=self.excel_file, sheet_name='ResistenciaResidual', position=(row_start, column + offset), val=value)
+
+    def make_report_file(self):
+        self.add_tests()
+        
+        """Genera el archivo de informe final."""
+        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
+        x='Deflection'
+        y='Load'
+        xlim=(0, self.defl_points[-1])
+        ylim=(0, None)
+        title='Fuerza-Deflexión'
+        xlabel='Deflexión (mm)'
+        ylabel='Fuerza (kN)'
+        sample_name='VIGA'
+        test_name='ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN'
+        num_1plot_pag=4
         comparative=True
         x_comp='Deflection'
         y_comp='Toughness'

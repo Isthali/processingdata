@@ -19,19 +19,27 @@ El script `unified_report.py` combina la funcionalidad de todos los scripts de g
 - **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 3
 
-### 3. `panels_residual` - Ensayos de Resistencia Residual
+### 3. `panels_residual` - Resistencia Residual con CMOD (Paneles/Vigas)
 - **Clase de reporte**: `Panel_Beam_residual_strength_test_report`
-- **Estándar por defecto**: EN14488
+- **Estándar por defecto**: EN14488 (también EN14651)
+- **Medición base**: CMOD como eje x (puntos de referencia en mm de apertura)
 - **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 3
 
-### 4. `tapas` - Ensayos de Flexión de Tapas de Buzón (Tránsito)
+### 4. `beams_residual` - Resistencia Residual de Vigas (ASTM C1609)
+- **Clase de reporte**: `Beam_residual_strength_test_report`
+- **Estándar por defecto**: ASTMC1609
+- **Medición base**: Deflexión como eje x (puntos de referencia en mm)
+- **Directorio base por defecto**: `D:/`
+- **Número de muestras por defecto**: 3
+
+### 5. `tapas` - Ensayos de Flexión de Tapas de Buzón (Tránsito)
 - **Clase de reporte**: `Tapa_buzon_flexion_test_report`
 - **Estándar por defecto**: NTP339.111
 - **Directorio base por defecto**: `D:/`
 - **Número de muestras por defecto**: 3
 
-### 5. `generic` - Conversión Genérica Excel → PDF
+### 6. `generic` - Conversión Genérica Excel → PDF
 - **Clase de reporte**: `Generate_test_report`
 - **Estándar por defecto**: DM
 - **Directorio base por defecto**: `D:/`
@@ -87,7 +95,7 @@ python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC199
 python unified_report.py panels --infle 111-25 --subinfle C --standard ASTMC1550 --empresa "PRODIMIN" --n 6 --offset 3 --base-dir "D:/Reportes/Paneles"
 ```
 
-### Ensayos de Resistencia Residual
+### Ensayos de Resistencia Residual (CMOD)
 
 ```bash
 # Configuración básica
@@ -95,6 +103,15 @@ python unified_report.py panels_residual --infle 111-25 --subinfle C
 
 # Configuración personalizada
 python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa "PRODIMIN" --n 4 --offset 7
+
+### Ensayos de Resistencia Residual de Vigas (ASTM C1609)
+
+```bash
+# Configuración básica (deflexión)
+python unified_report.py beams_residual --infle 222-25 --subinfle B --standard ASTMC1609 --n 3
+
+# Configuración personalizada
+python unified_report.py beams_residual --infle 222-25 --subinfle B --standard ASTMC1609 --empresa "PRODIMIN" --n 4 --offset 2
 ```
 
 ### Ensayos de Flexión de Tapas de Buzón (Tránsito)
@@ -160,6 +177,17 @@ python gen_report.py --infle 336-24 --subinfle S --standard DM --empresa EXC
 # Ahora
 python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa EXC
 ```
+
+## Notas técnicas sobre el procesamiento (test_ledi)
+
+- Las funciones de obtención de puntos característicos se han generalizado:
+	- `Toughness_mechanical_test.get_defl_cps(x_points=None, x_col='Deflection', include_extra_cols=None)`
+	- Permiten elegir la columna del eje x (por ejemplo, `x_col='CMOD'`).
+	- `include_extra_cols` añade columnas a devolver si existen (p.ej., incluir 'Deflection' cuando se usa `x_col='CMOD'`).
+- Los reportes ya fijan el eje correcto por defecto:
+	- `Panel_Beam_residual_strength_test_report`: usa `CMOD` como eje x (EN 14651/EN 14488).
+	- `Beam_residual_strength_test_report`: usa `Deflection` como eje x (ASTM C1609).
+- No es necesario que el usuario final pase `x_col`; el reporte lo configura internamente.
 
 ## Ventajas del Script Unificado
 
