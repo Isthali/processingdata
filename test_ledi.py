@@ -629,7 +629,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
             test.data = import_data_text(
                 file_path=str(test.data_file),
                 delimiter='auto',
-                variable_names=['Time', 'Displacement', 'Load', 'Deflection', 'CMOD'],
+                variable_names=['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'],
                 # skiprows se auto-detectará
                 debug_sample=False,
                 auto_detect_header=True,
@@ -839,7 +839,7 @@ class Axial_compression_test_report(Test_report):
         ylabel='Fuerza (kN)'
         sample_name='CORE'
         test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN'
-        num_1plot_pag=4
+        num_1plot_pag=5
         comparative=False
 
         self.add_tests()
