@@ -275,6 +275,36 @@ class Axial_compression_test(Resistance_mechanical_test):
         self.strength = self.maxLoad / self.area_sec
         return self.strength
     
+class Flexion_test(Resistance_mechanical_test):
+    """Ensayo de flexión con cálculo de momento flector y resistencia."""
+    
+    def __init__(self, sample_id=None, data_file=None):
+        super().__init__()
+        self.sample_id = sample_id
+        self.data_file = data_file
+        self.moment: float = 0.0
+        self.resistance: float = 0.0
+
+    def get_moment(self, span_length: float) -> float:
+        """Calcula el momento flector máximo para carga a los tercios en viga simplemente apoyada.
+
+        Args:
+            span_length: Luz de la viga (distancia entre apoyos).
+        """
+        self.moment = (self.maxLoad * span_length) / 6.0
+        return self.moment
+    
+    def get_resistance(self, section_modulus: float) -> float:
+        """Calcula la resistencia dividiendo momento máximo por módulo de sección.
+
+        Args:
+            section_modulus: Módulo de sección de la viga.
+        """
+        if section_modulus <= 0:
+            raise ValueError("Módulo de sección debe ser mayor que 0.")
+        self.resistance = self.moment / section_modulus
+        return self.resistance
+    
 class Panels_toughness_test(Toughness_mechanical_test):
     """Ensayo de tenacidad específico para paneles."""
     
@@ -914,6 +944,67 @@ class Tapa_buzon_flexion_test_report(Test_report):
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
 
+class Beam_flexion_test_report(Test_report):
+    """
+    Clase para generar informes de pruebas de flexion en vigas.
+
+    Atributos:
+        infle (str): Identificador de la prueba.
+        subinfle (str): Subidentificador de la prueba.
+        folder (str): Carpeta base donde se generan los archivos.
+        standard (str): Norma aplicada en la prueba.
+        client_id (str): Nombre de la empresa que realiza la prueba.
+        samples_id (list): Identificadores de las muestras.
+    """
+    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
+        super().__init__()
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = samples_id or []
+        self.tests = []
+        super().set_report_files()
+
+    def add_tests(self):
+        for id in self.samples_id:
+            test = Flexion_test(sample_id=id, data_file=f"{self.folder_path}vigas_{id}.xlsx")
+            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection'])
+            test.preprocess_data()
+            self.tests.append(test)
+
+    def write_report(self):
+        for i, test in enumerate(self.tests):
+            row = i+16
+            column = 17
+            write_data_excel(file_path=self.excel_file, sheet_name='Vigas', position=(row, column), val=test.get_max_load())
+
+    def make_report_file(self):
+        """Genera el archivo de informe final."""
+        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
+        x='Deflection'
+        y='Load'
+        xlim=(0, None)
+        ylim=(0, None)
+        title='Fuerza-Deflexión'
+        xlabel='Deflexión (mm)'
+        ylabel='Fuerza (kN)'
+        sample_name='VIGA'
+        test_name='ENSAYO DE FLEXIÓN'
+        num_1plot_pag=4
+        comparative=False
+
+        self.add_tests()
+        self.write_report()
+        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
+        self.make_plot_report(
+            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
+            comparative=comparative
+            )
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
+        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
+        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+
 class Generate_test_report(Test_report):
     """
     Clase para generar informes de pruebas de tenacidad en paneles.
@@ -944,3 +1035,4 @@ class Generate_test_report(Test_report):
         #merge_pdfs(pdf_list=[self.report_file], output_pdf=self.report_file)
         normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
         apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+
