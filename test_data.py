@@ -18,17 +18,11 @@ import numpy as np
 import openpyxl as xl
 import chardet
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple, Union, Any, Optional
+from typing import Sequence, Tuple, Union, Any, Optional
+from threading import Lock
 
 # Configurar logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Evitar duplicados: no agregar handler propio; delegar al root.
-root_logger = logging.getLogger()
-if logger.handlers:
-    logger.handlers.clear()
-logger.propagate = True
 
 # Opt-in to future pandas behavior to avoid FutureWarning about silent downcasting
 try:
@@ -42,6 +36,19 @@ __all__ = [
 ]
 
 _GLOBAL_CONVERSION_WARNING_EMITTED = False
+_GLOBAL_CONVERSION_WARNING_LOCK = Lock()
+
+
+def _should_emit_conversion_warning_once() -> bool:
+    """Thread-safe gate to emit conversion warning only once globally."""
+    global _GLOBAL_CONVERSION_WARNING_EMITTED
+    with _GLOBAL_CONVERSION_WARNING_LOCK:
+        if _GLOBAL_CONVERSION_WARNING_EMITTED:
+            return False
+        _GLOBAL_CONVERSION_WARNING_EMITTED = True
+        return True
+
+
 def detect_encoding(file_path: Union[str, Path], sample_size: int = 10000, default: str = 'utf-8') -> str:
     """Detecta la codificación probable de un archivo de texto.
 
@@ -75,7 +82,7 @@ def detect_encoding(file_path: Union[str, Path], sample_size: int = 10000, defau
         
         logger.debug(f"Encoding detectado: {encoding} (confianza: {confidence:.2f})")
         return encoding
-    except Exception as e:
+    except OSError as e:
         logger.warning(f"Error detectando encoding, usando {default}: {e}")
         return default
 
@@ -183,11 +190,14 @@ def import_data_text(
     if auto_detect_header:
         try:
             with file_path.open('r', errors='ignore') as fh:
-                preview = [next(fh) for _ in range(200)]
-        except StopIteration:
-            preview = []
-        except Exception as e:
-            logger.debug(f"No se pudo pre-escANear para encabezado: {e}")
+                preview = []
+                for _ in range(200):
+                    try:
+                        preview.append(next(fh))
+                    except StopIteration:
+                        break
+        except OSError as e:
+            logger.debug(f"No se pudo pre-escanear para encabezado: {e}")
             preview = []
         header_line = None
         for i, line in enumerate(preview):
@@ -203,12 +213,12 @@ def import_data_text(
         else:
             logger.debug("No se detectó encabezado; se mantiene skiprows proporcionado")
 
-    global _GLOBAL_CONVERSION_WARNING_EMITTED
     warned_conversion = False
     last_error: Optional[Exception] = None
     df: pd.DataFrame | None = None
 
-    for attempt, encoding in enumerate(encodings_to_try[:max_retries + 1]):
+    attempt_encodings = encodings_to_try[:max_retries + 1]
+    for attempt, encoding in enumerate(attempt_encodings):
         try:
             logger.debug(f"Intento {attempt+1} lectura (encoding={encoding})")
             # Intento directo
@@ -227,9 +237,12 @@ def import_data_text(
             except ValueError as ve:
                 if coerce_numeric and 'Unable to convert column' in str(ve):
                     col_problem = str(ve).split('column')[-1].strip()
-                    if (not warned_conversion) and (not _GLOBAL_CONVERSION_WARNING_EMITTED or not warn_once):
+                    should_warn = (
+                        (not warned_conversion)
+                        and ((not warn_once) or _should_emit_conversion_warning_once())
+                    )
+                    if should_warn:
                         logger.warning(f"Fallo conversión directa ({col_problem}). Reintentando con limpieza flexible.")
-                        _GLOBAL_CONVERSION_WARNING_EMITTED = True
                     warned_conversion = True
                     df = pd.read_csv(
                         str(file_path),
@@ -260,12 +273,12 @@ def import_data_text(
             break
         except (UnicodeDecodeError, UnicodeError) as e:
             last_error = e
-            if attempt == len(encodings_to_try) - 1:
+            if attempt == len(attempt_encodings) - 1:
                 logger.error(f"Error de encoding tras {attempt+1} intentos: {e}")
                 raise RuntimeError(f"Error de encoding: {e}")
             logger.warning(f"Encoding fallido ({encoding}), probando siguiente")
             continue
-        except Exception as e:
+        except (OSError, pd.errors.ParserError, ValueError) as e:
             last_error = e
             logger.error(f"Error inesperado importando datos: {e}")
             raise
