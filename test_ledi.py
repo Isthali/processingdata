@@ -17,7 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple, Union
+from typing import List, Sequence, Union
 
 from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel
 from edit_pdfs import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
@@ -359,9 +359,11 @@ class Tapa_buzon_flexion_test(Resistance_mechanical_test):
         self.umbral_kN = float(valor_kN)
 
     def get_resultado(self) -> str:
-        """Devuelve 'Cumple' si maxLoad ≥ umbral, 'No cumple' si < umbral, o 'Sin datos' si no hay datos."""
-
-        self.resultado = 'Cumple' if self.maxLoad >= self.umbral_kN else 'No cumple'
+        """Devuelve 'Cumple' si maxLoad >= umbral, 'No cumple' si < umbral, o 'Sin datos' si no hay datos."""
+        if self.data.empty:
+            self.resultado = 'Sin datos'
+        else:
+            self.resultado = 'Cumple' if self.maxLoad >= self.umbral_kN else 'No cumple'
         return self.resultado
 
     def get_resumen(self) -> dict:
@@ -425,29 +427,25 @@ class Test_report:
         return self.report_file
 
     def plot_report_data(self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_pag, final_pag=False):
-            # Preparar datos para gráficos superpuestos
-            fig, ax = plt.subplots(figsize=(11.7, 8.3))
-            legends = [f'{sample_name} {test.get_sample_id()}' for test in self.tests]
-            for i, test in enumerate(self.tests):
-                data = test.data_process
-                ax.plot(data[x], data[y], label=legends[i], linewidth=2)
-            # Configuración común del gráfico
-            ax.set(xlim=xlim, ylim=ylim)
-            ax.set_title(title, fontsize=10)
-            ax.set_xlabel(xlabel, fontsize=9)
-            ax.set_ylabel(ylabel, fontsize=9)
-            ax.legend(fontsize=9)
-            ax.grid(visible=True, which='both', linestyle='--')
-            ax.minorticks_on()
-            ax.set_position([0.10, 0.15, 0.75, 0.75])
-            # ax.set_position([0.10, 0.15, 0.65, 0.75])
-            # Texto adicional en el gráfico
-            fig.text(0.05, 0.05, f"INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}", fontsize=8, horizontalalignment='left')
-            fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
-            fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')
-            if final_pag:
-                fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
-            return fig, ax
+        fig, ax = plt.subplots(figsize=(11.7, 8.3))
+        legends = [f'{sample_name} {test.get_sample_id()}' for test in self.tests]
+        for i, test in enumerate(self.tests):
+            data = test.data_process
+            ax.plot(data[x], data[y], label=legends[i], linewidth=2)
+        ax.set(xlim=xlim, ylim=ylim)
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel(xlabel, fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.legend(fontsize=9)
+        ax.grid(visible=True, which='both', linestyle='--')
+        ax.minorticks_on()
+        ax.set_position([0.10, 0.15, 0.75, 0.75])
+        fig.text(0.05, 0.05, f"INF-LE {self.repor_id['infle']}{self.repor_id['subinfle']}", fontsize=8, horizontalalignment='left')
+        fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
+        fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')
+        if final_pag:
+            fig.text(0.85, 0.03, 'Fin del informe', fontsize=8, horizontalalignment='right')
+        return fig, ax
 
     def make_plot_report(
             self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_1plot_pag, final_pag=False,
@@ -469,6 +467,7 @@ class Test_report:
                     final_pag=final_pag
                     )
                 pdf_file.savefig(fig_report)
+                plt.close(fig_report)
                 num_1plot_pag += 1
             
             # Handle both string and list inputs for plotting parameters
@@ -480,8 +479,9 @@ class Test_report:
             xlabel_list = xlabel if isinstance(xlabel, list) else [xlabel]
             ylabel_list = ylabel if isinstance(ylabel, list) else [ylabel]
             
-            # Ensure all lists have the same length
             num_plots = len(x_list)
+            if not all(len(lst) == num_plots for lst in [y_list, xlim_list, ylim_list, title_list, xlabel_list, ylabel_list]):
+                raise ValueError(f"Todas las listas de parámetros de gráfico deben tener la misma longitud ({num_plots}).")
             
             for i, test in enumerate(self.tests):
                 for j in range(num_plots):
@@ -518,7 +518,7 @@ class Test_report:
                         final_pag=is_final_page
                         )
                     pdf_file.savefig(fig_test)
-                plt.close()
+                    plt.close(fig_test)
 
     def make_report_file(self):
         return self.report_file
@@ -564,7 +564,7 @@ class Panel_toughness_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panels_toughness_test(sample_id=id, data_file=f"{self.folder_path}Losa P{id}.xlsx")
+            test = Panels_toughness_test(sample_id=id, data_file=str(Path(self.folder_path) / f"Losa P{id}.xlsx"))
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
             # Para tenacidad según ASTM C1550/EFNARC/EN 14488-5, los puntos se definen en deflexión
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
@@ -654,18 +654,16 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panel_Beam_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
-            # Usar delimitador flexible por espacios/tabs y permitir auto detección de encabezado
+            test = Panel_Beam_residual_strength_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"))
             test.data = import_data_text(
                 file_path=str(test.data_file),
                 delimiter='auto',
                 variable_names=['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'],
-                # skiprows se auto-detectará
                 debug_sample=False,
                 auto_detect_header=True,
                 min_valid_cols=3,
                 warn_once=True,
-                audit_log_dir=f"{self.folder_path}audits"
+                audit_log_dir=str(Path(self.folder_path) / "audits")
             )
             # Para resistencia residual según EN 14651/EN 14488, los puntos se definen en CMOD
             test.preprocess_data(defl_points=self.defl_points, x_col='CMOD', include_extra_cols=['Deflection'])
@@ -754,20 +752,18 @@ class Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Beam_residual_strength_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-Viga {id}/specimen.dat")
-            # Usar delimitador flexible por espacios/tabs y permitir auto detección de encabezado
+            test = Beam_residual_strength_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"))
             test.data = import_data_text(
                 file_path=str(test.data_file),
                 delimiter='auto',
                 variable_names=['Time', 'Displacement', 'Load', 'Deflection', 'Deflection2'],
-                # skiprows se auto-detectará
                 debug_sample=False,
                 auto_detect_header=True,
                 min_valid_cols=3,
                 warn_once=True,
-                audit_log_dir=f"{self.folder_path}audits"
+                audit_log_dir=str(Path(self.folder_path) / "audits")
             )
-            # Para resistencia residual según EN 14651/EN 14488, los puntos se definen en CMOD
+            # Para resistencia residual según ASTM C1609, los puntos se definen en deflexión
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
@@ -818,7 +814,7 @@ class Beam_residual_strength_test_report(Test_report):
 
 class Axial_compression_test_report(Test_report):
     """
-    Clase para generar informes de pruebas de tenacidad en paneles.
+    Clase para generar informes de pruebas de compresión axial.
 
     Atributos:
         infle (str): Identificador de la prueba.
@@ -842,7 +838,7 @@ class Axial_compression_test_report(Test_report):
         for id in self.samples_id:
             #test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat")
             #test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
-            test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}.xlsx")
+            test = Axial_compression_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"))
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Displacement', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
@@ -907,7 +903,7 @@ class Tapa_buzon_flexion_test_report(Test_report):
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Tapa_buzon_flexion_test(sample_id=id, data_file=f"{self.folder_path}tapas_{id}.xlsx")
+            test = Tapa_buzon_flexion_test(sample_id=id, data_file=str(Path(self.folder_path) / f"tapas_{id}.xlsx"))
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
@@ -968,7 +964,7 @@ class Beam_flexion_test_report(Test_report):
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Flexion_test(sample_id=id, data_file=f"{self.folder_path}vigas_{id}.xlsx")
+            test = Flexion_test(sample_id=id, data_file=str(Path(self.folder_path) / f"vigas_{id}.xlsx"))
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection'])
             test.preprocess_data()
             self.tests.append(test)
@@ -1007,7 +1003,7 @@ class Beam_flexion_test_report(Test_report):
 
 class Generate_test_report(Test_report):
     """
-    Clase para generar informes de pruebas de tenacidad en paneles.
+    Clase genérica para generar informes de pruebas a partir de un Excel existente.
 
     Atributos:
         infle (str): Identificador de la prueba.
