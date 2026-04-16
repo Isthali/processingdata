@@ -1,218 +1,161 @@
-# Script Unificado de Reportes - Guía de Uso
+# Script Unificado de Reportes — Guía de Uso
 
-## Descripción
+`unified_report.py` genera los reportes PDF de los distintos ensayos mecánicos
+del laboratorio desde un único punto de entrada.
 
-El script `unified_report.py` combina la funcionalidad de todos los scripts de generación de reportes individuales en una sola herramienta. Permite generar reportes para diferentes tipos de ensayos mecánicos de manera consistente y eficiente.
+## Requisitos
 
-## Tipos de Ensayo Soportados
+- **Sistema operativo**: Windows con Microsoft Excel instalado. La conversión
+  Excel → PDF usa COM (`pywin32`) y **no funciona en Linux/macOS**.
+- **Python 3.9+** y las dependencias de `requirements.txt`
+  (`numpy`, `scipy`, `pandas`, `matplotlib`, `openpyxl`, `chardet`, `pypdf`,
+  `reportlab`, `pywin32`).
 
-### 1. `cores` - Ensayos de Compresión Axial (Testigos)
-- **Clase de reporte**: `Axial_compression_test_report`
-- **Estándar por defecto**: CORES
-- **Directorio base por defecto**: `D:/`
-- **Número de muestras por defecto**: 6
+## Entradas esperadas en disco
 
-### 2. `panels` - Ensayos de Tenacidad de Paneles
-- **Clase de reporte**: `Panel_toughness_test_report`
-- **Estándar por defecto**: EFNARC1996
-- **Estándares disponibles**: EFNARC1996, EFNARC1999, ASTMC1550
-- **Directorio base por defecto**: `D:/`
-- **Número de muestras por defecto**: 3
+Antes de correr un subcomando, la carpeta de trabajo `{base-dir}/{infle}/`
+debe contener:
 
-### 3. `panels_residual` - Resistencia Residual con CMOD (Paneles/Vigas)
-- **Clase de reporte**: `Panel_Beam_residual_strength_test_report`
-- **Estándar por defecto**: EN14488 (también EN14651)
-- **Medición base**: CMOD como eje x (puntos de referencia en mm de apertura)
-- **Directorio base por defecto**: `D:/`
-- **Número de muestras por defecto**: 3
+1. **Plantilla Excel pre-configurada** con las hojas y celdas donde el reporte
+   escribe los resultados. El nombre debe ser:
+   ```
+   INFLE_{infle}[-{subinfle}]_{standard}_{client}[_{n}].xlsm
+   ```
+   (los genéricos usan `.xlsx`; el sufijo `_{n}` sólo aparece si hay muestras).
 
-### 4. `beams_residual` - Resistencia Residual de Vigas (ASTM C1609)
-- **Clase de reporte**: `Beam_residual_strength_test_report`
-- **Estándar por defecto**: ASTMC1609
-- **Medición base**: Deflexión como eje x (puntos de referencia en mm)
-- **Directorio base por defecto**: `D:/`
-- **Número de muestras por defecto**: 3
+2. **Archivos de datos crudos por muestra**, con la convención de nombre y las
+   columnas que espera cada tipo:
 
-### 5. `tapas` - Ensayos de Flexión de Tapas de Buzón (Tránsito)
-- **Clase de reporte**: `Tapa_buzon_flexion_test_report`
-- **Estándar por defecto**: NTP339.111
-- **Directorio base por defecto**: `D:/`
-- **Número de muestras por defecto**: 3
+   | Subcomando        | Archivo por muestra                         | Columnas                                 |
+   |-------------------|---------------------------------------------|------------------------------------------|
+   | `cores`           | `{infle}-d{id}.xlsx`                        | Time, Displacement, Load                 |
+   | `panels`          | `Losa P{id}.xlsx`                           | Time, Load, Deflection, Displacement     |
+   | `panels_residual` | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, CMOD, Deflection |
+   | `beams_residual`  | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, Deflection, Deflection2 |
+   | `tapas`           | `tapas_{id}.xlsx`                           | Time, Load                               |
+   | `generic`         | (sin datos crudos — sólo la plantilla)      | —                                        |
 
-### 6. `generic` - Conversión Genérica Excel → PDF
-- **Clase de reporte**: `Generate_test_report`
-- **Estándar por defecto**: DM
-- **Directorio base por defecto**: `D:/`
-- **Sin muestras específicas** (n=0)
+Si la plantilla o los archivos de datos no existen, el error aparece al momento
+de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
 
-## Sintaxis de Uso
+## Subcomandos
+
+| Subcomando        | Ensayo                                             | Estándar por defecto | Estándares disponibles                          | n por defecto | Cliente por defecto |
+|-------------------|----------------------------------------------------|----------------------|-------------------------------------------------|---------------|---------------------|
+| `cores`           | Compresión axial de testigos                       | `CORES`              | libre                                           | 6             | `PRODIMIN`          |
+| `panels`          | Tenacidad de paneles (ASTM C1550, EFNARC, EN 14488-5) | `EFNARC1996`         | `ASTMC1550`, `EFNARC1996`, `EFNARC1999`, `EN14488-5` | 3             | `PRODIMIN`          |
+| `panels_residual` | Resistencia residual con CMOD (EN 14651 / EN 14488) | `EN14488`            | `EN14651`, `EN14488`                            | 3             | `PRODIMIN`          |
+| `beams_residual`  | Resistencia residual de vigas (ASTM C1609)         | `ASTMC1609`          | `ASTMC1609`                                     | 3             | `PRODIMIN`          |
+| `tapas`           | Flexión de tapas de buzón (tránsito)               | `Tapa_Circular_CA`   | libre                                           | 3             | `PRODIMIN`          |
+| `generic`         | Conversión Excel → PDF sin procesamiento           | `DM`                 | libre                                           | 0             | `EMPRESA`           |
+
+"Libre" significa que la CLI no restringe el valor; el reporte acepta
+cualquier string como identificador del estándar, pero no calculará puntos
+característicos por norma si no están mapeados internamente.
+
+## Sintaxis
 
 ```bash
-python unified_report.py <tipo_ensayo> [opciones]
+python unified_report.py <subcomando> --infle <id> [opciones]
 ```
 
-### Argumentos Comunes
+### Argumentos comunes
 
-- `--infle`: **(Requerido)** Identificador del informe (ej: 336-24, 111-25)
-- `--subinfle`: Sub-identificador del informe (ej: S, C). Por defecto: vacío
-- `--standard`: Estándar del ensayo. Cada tipo tiene su valor por defecto
-- `--empresa`: Nombre de la empresa cliente. Por defecto según el tipo
-- `--base-dir`: Directorio base donde se generará el reporte
-- `--verbose`, `-v`: Habilita salida detallada para diagnóstico
+| Flag           | Requerido | Descripción                                                       |
+|----------------|-----------|-------------------------------------------------------------------|
+| `--infle`      | sí        | Identificador del informe (ej. `336-24`, `111-25`).               |
+| `--subinfle`   | no        | Sub-identificador (ej. `S`, `C`). Vacío por defecto.              |
+| `--standard`   | no        | Estándar del ensayo. Usa el default del subcomando si se omite.   |
+| `--empresa`    | no        | Nombre del cliente.                                               |
+| `--base-dir`   | no        | Directorio base. Por defecto `D:/`.                               |
+| `--verbose`/`-v` | no      | Activa logging DEBUG.                                             |
 
-### Argumentos Específicos para Ensayos con Muestras
+### Argumentos de muestras (todos los subcomandos salvo `generic`)
 
-Los tipos `cores`, `panels`, y `panels_residual` admiten:
+Las opciones `--n` y `--ids` son **mutuamente exclusivas**:
 
-- `--n`: Número de muestras a procesar
-- `--offset`: Valor inicial para los IDs de muestras (por defecto: 1)
+| Flag       | Descripción                                                              |
+|------------|--------------------------------------------------------------------------|
+| `--n N`    | Número de muestras consecutivas desde `--offset` (default del subcomando si se omite). |
+| `--offset` | Valor inicial de ID cuando se usa `--n`. Por defecto 1.                  |
+| `--ids`    | Lista explícita de IDs (ej. `--ids 3 4 7`). Anula `--n`/`--offset`.      |
 
-## Ejemplos de Uso
+## Ejemplos
 
-### Ensayos de Compresión Axial (Testigos)
+### Compresión axial (testigos)
 
 ```bash
-# Configuración básica con valores por defecto
+# Defaults (n=6 muestras desde id=1)
 python unified_report.py cores --infle 336-24 --subinfle S
 
-# Configuración personalizada
-python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa "MI_EMPRESA" --n 8 --base-dir "D:/Reportes/Testigos"
-
-# Con salida verbose para diagnóstico
-python unified_report.py cores --infle 336-24 --subinfle S --verbose
+# 8 muestras desde id=3 con carpeta custom
+python unified_report.py cores --infle 336-24 --subinfle S \
+    --n 8 --offset 3 --base-dir D:/Reportes/Testigos
 ```
 
-### Ensayos de Tenacidad de Paneles
+### Tenacidad de paneles
 
 ```bash
-# Configuración básica
 python unified_report.py panels --infle 111-25 --subinfle C
 
-# Con estándar específico
-python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1999 --n 5
-
-# Configuración completa personalizada
-python unified_report.py panels --infle 111-25 --subinfle C --standard ASTMC1550 --empresa "PRODIMIN" --n 6 --offset 3 --base-dir "D:/Reportes/Paneles"
+# Con norma e IDs no consecutivos
+python unified_report.py panels --infle 111-25 --subinfle C \
+    --standard EFNARC1999 --ids 2 4 5
 ```
 
-### Ensayos de Resistencia Residual (CMOD)
+### Resistencia residual con CMOD
 
 ```bash
-# Configuración básica
-python unified_report.py panels_residual --infle 111-25 --subinfle C
-
-# Configuración personalizada
-python unified_report.py panels_residual --infle 111-25 --subinfle C --standard EN14488 --empresa "PRODIMIN" --n 4 --offset 7
-
-### Ensayos de Resistencia Residual de Vigas (ASTM C1609)
-
-```bash
-# Configuración básica (deflexión)
-python unified_report.py beams_residual --infle 222-25 --subinfle B --standard ASTMC1609 --n 3
-
-# Configuración personalizada
-python unified_report.py beams_residual --infle 222-25 --subinfle B --standard ASTMC1609 --empresa "PRODIMIN" --n 4 --offset 2
+python unified_report.py panels_residual --infle 111-25 --subinfle C \
+    --standard EN14488 --n 4 --offset 7
 ```
 
-### Ensayos de Flexión de Tapas de Buzón (Tránsito)
+### Resistencia residual de vigas (deflexión)
 
 ```bash
-# Configuración básica
-python unified_report.py tapas --infle 245-25 --subinfle A --empresa "FADECO" --n 6
-
-# Configuración personalizada
-python unified_report.py tapas --infle 222-25 --subinfle A --standard Tapa_Circular_CA --empresa "PRODIMIN" --n 3 --base-dir "D:/Reportes/Tapas"
+python unified_report.py beams_residual --infle 222-25 --subinfle B --n 3
 ```
 
-### Conversión Genérica
+### Flexión de tapas de buzón
 
 ```bash
-# Configuración básica
-python unified_report.py generic --infle 336-24 --subinfle S
-
-# Configuración personalizada
-python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa "EMPRESA_CLIENTE" --base-dir "D:/Reportes/Genericos"
+python unified_report.py tapas --infle 245-25 --subinfle A --empresa FADECO --n 6
 ```
 
-## Archivos de Salida
+### Conversión genérica
 
-El script generará automáticamente:
-
-1. **Directorio de trabajo**: `{base-dir}/{infle}/`
-2. **Archivo Excel**: Con los datos procesados del ensayo
-3. **Archivo PDF**: Versión formateada y lista para entrega
-
-## Registro de Actividad (Logging)
-
-- **Modo normal**: Muestra información básica del proceso
-- **Modo verbose** (`--verbose`): Muestra detalles técnicos para diagnóstico y resolución de problemas
-
-## Migración desde Scripts Individuales
-
-### Equivalencias de comandos:
-
-**cores_report.py** → `unified_report.py cores`
 ```bash
-# Antes
-python cores_report.py --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
-
-# Ahora
-python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
+python unified_report.py generic --infle 336-24 --subinfle S \
+    --empresa EMPRESA_CLIENTE
 ```
 
-**panels_report.py** → `unified_report.py panels`
-```bash
-# Antes
-python panels_report.py --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
+## Archivos de salida
 
-# Ahora
-python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
-```
+Dentro de `{base-dir}/{infle}/` quedan:
 
-**gen_report.py** → `unified_report.py generic`
-```bash
-# Antes
-python gen_report.py --infle 336-24 --subinfle S --standard DM --empresa EXC
+1. La plantilla Excel **modificada** (el script escribe resultados en celdas).
+2. `plots.pdf` — gráficos intermedios generados con matplotlib.
+3. `INFLE_{infle}[-{subinfle}]_{standard}_{client}[_{n}].pdf` — el reporte
+   final con encabezado/pie aplicado.
 
-# Ahora
-python unified_report.py generic --infle 336-24 --subinfle S --standard DM --empresa EXC
-```
+## Resolución de problemas
 
-## Notas técnicas sobre el procesamiento (test_ledi)
+Ayuda integrada:
 
-- Las funciones de obtención de puntos característicos se han generalizado:
-	- `Toughness_mechanical_test.get_defl_cps(x_points=None, x_col='Deflection', include_extra_cols=None)`
-	- Permiten elegir la columna del eje x (por ejemplo, `x_col='CMOD'`).
-	- `include_extra_cols` añade columnas a devolver si existen (p.ej., incluir 'Deflection' cuando se usa `x_col='CMOD'`).
-- Los reportes ya fijan el eje correcto por defecto:
-	- `Panel_Beam_residual_strength_test_report`: usa `CMOD` como eje x (EN 14651/EN 14488).
-	- `Beam_residual_strength_test_report`: usa `Deflection` como eje x (ASTM C1609).
-- No es necesario que el usuario final pase `x_col`; el reporte lo configura internamente.
-
-## Ventajas del Script Unificado
-
-1. **Interfaz consistente**: Todos los tipos de ensayo usan la misma sintaxis
-2. **Menos archivos**: Un solo script en lugar de cuatro separados
-3. **Mantenimiento simplificado**: Cambios centralizados en una sola ubicación
-4. **Mejor documentación**: Ayuda integrada para todos los tipos
-5. **Validación mejorada**: Verificación consistente de argumentos
-6. **Logging unificado**: Sistema de registro consistente para todos los tipos
-
-## Resolución de Problemas
-
-### Ver ayuda detallada:
 ```bash
 python unified_report.py --help
-python unified_report.py cores --help
-python unified_report.py panels --help
+python unified_report.py <subcomando> --help
 ```
 
-### Activar modo diagnóstico:
-```bash
-python unified_report.py <tipo> --verbose [otros_argumentos]
-```
+Errores comunes:
 
-### Errores comunes:
-1. **Directorio no existe**: Se creará automáticamente con advertencia
-2. **Número de muestras inválido**: Debe ser >= 0
-3. **Estándar no válido**: Verificar opciones disponibles con `--help`
+- **Directorio base no existe**: se crea automáticamente con una advertencia.
+- **`--n` negativo**: rechazado (debe ser ≥ 0). Los valores de `--ids` deben ser > 0.
+- **Estándar no válido**: los subcomandos con lista cerrada (`panels`,
+  `panels_residual`, `beams_residual`) rechazan valores fuera de la lista con
+  `--help`. Los demás aceptan cualquier string.
+- **Archivo de datos no encontrado**: la traza apunta a la ruta esperada bajo
+  `{base-dir}/{infle}/`. Verifica que los nombres coincidan con la convención
+  del subcomando (tabla arriba).
+- **Excel no convierte a PDF**: requiere Windows con Excel instalado. Si el
+  error menciona `win32com`, estás corriendo en Linux/macOS.
