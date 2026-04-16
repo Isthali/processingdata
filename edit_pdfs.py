@@ -1,41 +1,19 @@
 """Funciones utilitarias para conversión y edición de PDFs y hojas Excel.
 
-Mejoras respecto a la versión previa:
-  - Manejo robusto de errores y liberación de recursos COM en convert_excel_to_pdf.
-  - Soporte de rango de páginas (From/To) en exportación de Excel.
-  - Type hints y docstrings para todas las funciones.
-  - Validación de rutas con pathlib y mensajes claros.
-  - merge_pdfs omite silenciosamente archivos inexistentes con aviso.
-  - normalización de orientación usando rotación condicional.
-  - apply_header_footer_pdf permite usar 1 o 2 páginas en el PDF de encabezado/pie (portrait/landscape).
-  - Sistema de logging integrado.
-  - Validaciones mejoradas y manejo de excepciones específicas.
+``convert_excel_to_pdf`` requiere Windows + Excel (usa pywin32/COM). Las demás
+funciones (merge, normalize, overlay) usan sólo ``pypdf`` y funcionan en cualquier
+plataforma.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Iterable, List, Sequence, Union, Optional
+from typing import Sequence, Union, Optional
 
-import win32com.client as win32
 from pypdf import PdfReader, PdfWriter
 
-# Opcional: mantener imports de reportlab si se amplía para generar overlays dinámicos
-from reportlab.pdfgen import canvas  # noqa: F401
-from reportlab.lib.pagesizes import A4  # noqa: F401
-from reportlab.lib.units import mm  # noqa: F401
-
-# Configurar logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Handler solo si no existe
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
 def convert_excel_to_pdf(
@@ -84,6 +62,12 @@ def convert_excel_to_pdf(
     logger.info(f"Convirtiendo Excel a PDF: {excel_path} -> {pdf_path}")
     if pag_i is not None or pag_f is not None:
         logger.info(f"Rango de páginas: {pag_i or 'inicio'} - {pag_f or 'final'}")
+
+    # Import diferido: pywin32 sólo está disponible en Windows. Mantenerlo aquí
+    # evita romper la importación del módulo en Linux/macOS (donde el resto de
+    # funciones — merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf —
+    # sigue siendo utilizable).
+    import win32com.client as win32
 
     excel = None
     workbook = None
@@ -302,28 +286,39 @@ def apply_header_footer_pdf(
         pages_overlay = overlay_reader.pages
         if len(pages_overlay) == 0:
             raise RuntimeError("El PDF de header/footer no contiene páginas")
-        
+
         portrait_overlay = pages_overlay[0]
         landscape_overlay = pages_overlay[1] if len(pages_overlay) > 1 else pages_overlay[0]
-        
+        single_page_overlay = len(pages_overlay) == 1
+
         logger.info(f"Overlay configurado: {len(pages_overlay)} página(s) de plantilla")
-        
+
         writer = PdfWriter()
         total_pages = len(base_reader.pages)
         portrait_count = 0
         landscape_count = 0
-        
+        landscape_fallback_warned = False
+
         for i, page in enumerate(base_reader.pages):
             w = float(page.mediabox.width)
             h = float(page.mediabox.height)
-            
+
             if w > h:
+                if single_page_overlay and not landscape_fallback_warned:
+                    logger.warning(
+                        f"El PDF de overlay sólo trae 1 página y el documento base "
+                        f"tiene páginas en landscape (detectado en página {i+1}). Se "
+                        f"aplicará el overlay portrait — el resultado puede quedar "
+                        f"descolocado. Considera un overlay con 2 páginas "
+                        f"(portrait, landscape)."
+                    )
+                    landscape_fallback_warned = True
                 page.merge_page(landscape_overlay, expand=True)
                 landscape_count += 1
             else:
                 page.merge_page(portrait_overlay, expand=True)
                 portrait_count += 1
-            
+
             writer.add_page(page)
             
             if (i + 1) % 10 == 0:  # Log progreso cada 10 páginas

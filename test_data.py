@@ -1,18 +1,15 @@
 """Utilidades de importación y escritura de datos para ensayos mecánicos.
 
-Mejoras incluidas:
-  - Detección de encoding con fallback robusto.
-  - Parámetros configurables (skiprows, dtype).
-  - Manejo de errores y validaciones explícitas.
-  - Evita errores silenciosos al escribir en hojas inexistentes (opción de crear).
-  - Type hints y docstrings para mantenimiento.
-  - Logging configurado para debug y tracking.
-  - Validaciones de entrada mejoradas.
+Expone lectura tolerante a encoding/formato (``import_data_text``,
+``import_data_excel``), lectura/escritura de celdas individuales y en lotes
+(``get_data_excel``, ``write_data_excel``, ``write_batch_excel``), y validación
+de estructura de libros (``validate_excel_file``).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import pandas as pd
 import numpy as np
 import openpyxl as xl
@@ -32,7 +29,8 @@ except Exception:
 
 __all__ = [
     'detect_encoding', 'import_data_text', 'import_data_excel', 'get_data_excel',
-    'write_data_excel', 'write_batch_excel', 'validate_excel_file'
+    'write_data_excel', 'write_batch_excel', 'write_multisheet_excel',
+    'validate_excel_file',
 ]
 
 _GLOBAL_CONVERSION_WARNING_EMITTED = False
@@ -87,6 +85,98 @@ def detect_encoding(file_path: Union[str, Path], sample_size: int = 10000, defau
         return default
 
 
+_HEADER_KEYWORDS = ('running time', 'displacement')
+_CANDIDATE_DELIMS = ('\t', ',', ';', '|')
+
+
+def _read_preview_lines(file_path: Path, n_lines: int) -> list:
+    """Lee hasta ``n_lines`` líneas del archivo para muestreo, con errors='ignore'."""
+    try:
+        with file_path.open('r', errors='ignore') as fh:
+            out = []
+            for _ in range(n_lines):
+                try:
+                    out.append(next(fh))
+                except StopIteration:
+                    break
+            return out
+    except OSError as e:
+        logger.debug(f"No se pudo leer preview de {file_path}: {e}")
+        return []
+
+
+def _find_header_line(lines: Sequence[str]) -> Optional[int]:
+    """Índice de la primera línea que contiene todas las keywords de encabezado."""
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if all(k in low for k in _HEADER_KEYWORDS):
+            return i
+    return None
+
+
+def _detect_delimiter(lines: Sequence[str], expected_cols: int) -> Tuple[str, float]:
+    """Devuelve ``(delimiter, score)`` del separador más probable entre candidatos.
+
+    Prueba tab/coma/punto-y-coma/pipe y, si ninguno alcanza score ≥ 0.5,
+    considera whitespace flexible (``r'\\s+'``).
+    """
+    sample = [ln for ln in lines if ln.strip()][:50]
+    if not sample:
+        return '\t', 0.0
+
+    best_delim, best_score = '\t', -1.0
+    for cand in _CANDIDATE_DELIMS:
+        good = sum(1 for ln in sample if len(ln.strip().split(cand)) == expected_cols)
+        score = good / len(sample)
+        if score > best_score:
+            best_delim, best_score = cand, score
+
+    if best_score < 0.5:
+        good = sum(1 for ln in sample if len(re.split(r'\s+', ln.strip())) >= expected_cols)
+        score_ws = good / len(sample)
+        if score_ws >= best_score:
+            return r'\s+', score_ws
+
+    return best_delim, best_score
+
+
+def _clean_numeric_column(series: pd.Series) -> pd.Series:
+    """Limpia texto ruidoso (espacios, NBSP, comas) y convierte a numérico con NaN."""
+    cleaned = (
+        series.astype(str)
+        .str.strip()
+        .str.replace('\u00a0', ' ', regex=False)
+        .str.replace(',', '.', regex=False)
+        .str.replace(r'[^0-9eE+\-\.]+', '', regex=True)
+    )
+    return pd.to_numeric(cleaned.replace('', np.nan), errors='coerce')
+
+
+def _save_audit_sample(
+    df: pd.DataFrame,
+    audit_dir: Path,
+    stem: str,
+    head: int,
+    mid: int,
+    tail: int,
+) -> None:
+    """Guarda una muestra head/mid/tail del DataFrame como CSV para trazabilidad."""
+    try:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        n = len(df)
+        sample_idx = list(df.index[:head])
+        if n > (head + tail):
+            mid_start = max(0, n // 2 - mid // 2)
+            sample_idx.extend(df.index[mid_start: mid_start + mid])
+        sample_idx.extend(df.index[-tail:])
+        sample_idx = sorted(set(sample_idx))
+        out_path = audit_dir / f"{stem}.audit.csv"
+        df.loc[sample_idx].to_csv(out_path, index=False)
+        logger.debug(f"Auditoría guardada: {out_path}")
+    except OSError as e:
+        logger.debug(f"Auditoría no generada: {e}")
+
+
 def import_data_text(
     file_path: Union[str, Path],
     delimiter: str,
@@ -107,12 +197,13 @@ def import_data_text(
 ) -> pd.DataFrame:
     """Importa datos de texto con estrategias robustas de limpieza y auditoría.
 
-    Parámetros clave nuevos:
-      - auto_detect_header: intenta localizar la línea 'Running Time' y ajusta skiprows.
-      - coerce_numeric: fuerza limpieza y conversión numérica columna por columna.
-      - min_valid_cols: mínimo de columnas no NaN requerido para conservar una fila.
-      - warn_once: evita repetir el warning de conversión fallida.
-      - audit_log_dir: si se indica, guarda una muestra audit.csv (head/mid/tail) para trazabilidad.
+    - ``delimiter='auto'`` detecta el separador en un muestreo de las primeras líneas.
+    - ``auto_detect_header`` localiza la línea 'Running Time … Displacement' y ajusta ``skiprows``.
+    - ``coerce_numeric`` fuerza limpieza y conversión numérica columna por columna si la
+      lectura directa con ``dtype`` falla.
+    - ``min_valid_cols`` fija el mínimo de columnas no-NaN requerido para conservar una fila.
+    - ``warn_once`` evita repetir el warning de conversión fallida entre hilos.
+    - ``audit_log_dir`` — si se indica, guarda una muestra ``*.audit.csv`` (head/mid/tail).
     """
     if skiprows < 0:
         raise ValueError("skiprows debe ser >= 0")
@@ -127,86 +218,17 @@ def import_data_text(
 
     encodings_to_try = [detect_encoding(file_path), 'utf-8', 'latin-1', 'cp1252']
 
-    # Detectar delimitador si se solicita
     if delimiter == 'auto':
-        try:
-            with file_path.open('r', errors='ignore') as fh:
-                raw_lines = []
-                for _ in range(400):  # leer líneas suficientes para buscar encabezado y datos
-                    try:
-                        raw_lines.append(next(fh))
-                    except StopIteration:
-                        break
-        except Exception as e:
-            logger.debug(f"No se pudo leer para auto-delimiter: {e}")
-            raw_lines = []
-        # Intentar detectar encabezado preliminar antes de delimitar
-        header_index = None
-        for i, line in enumerate(raw_lines):
-            lw = line.lower()
-            if 'running time' in lw and 'displacement' in lw:
-                header_index = i
-                break
+        raw_lines = _read_preview_lines(file_path, n_lines=400)
+        header_index = _find_header_line(raw_lines)
         data_section = raw_lines[(header_index + 2) if header_index is not None else 0:]
-        candidate_delims = ['\t', ',', ';', '|']
-        # whitespace flexible se evalúa aparte
-        best_delim = '\t'
-        best_score = -1
-        expected_cols = len(variable_names)
-        sample = [ln for ln in data_section if ln.strip()][:50]
-        if sample:
-            for cand in candidate_delims:
-                good = 0
-                for ln in sample:
-                    parts = ln.strip().split(cand)
-                    if len(parts) == expected_cols:
-                        good += 1
-                score = good / len(sample)
-                if score > best_score:
-                    best_score = score
-                    best_delim = cand
-            # Probar whitespace si ninguno alcanza umbral >=0.5
-            if best_score < 0.5:
-                import re
-                good = 0
-                for ln in sample:
-                    parts = re.split(r'\s+', ln.strip())
-                    if len(parts) >= expected_cols:  # puede haber columnas extra de ruido
-                        good += 1
-                score_ws = good / len(sample)
-                if score_ws >= best_score:
-                    delimiter = r'\s+'
-                else:
-                    delimiter = best_delim
-            else:
-                delimiter = best_delim
-            delim_repr = repr(delimiter)
-            logger.info(f"Delimitador auto-detectado: {delim_repr} (score={best_score:.2f})")
-        else:
-            logger.debug("No se pudo muestrear líneas para detectar delimitador; se usará '\t'")
-            delimiter = '\t'
+        delimiter, score = _detect_delimiter(data_section, len(variable_names))
+        logger.info(f"Delimitador auto-detectado: {delimiter!r} (score={score:.2f})")
 
-    # Auto-detección de encabezado (ajusta skiprows)
     if auto_detect_header:
-        try:
-            with file_path.open('r', errors='ignore') as fh:
-                preview = []
-                for _ in range(200):
-                    try:
-                        preview.append(next(fh))
-                    except StopIteration:
-                        break
-        except OSError as e:
-            logger.debug(f"No se pudo pre-escanear para encabezado: {e}")
-            preview = []
-        header_line = None
-        for i, line in enumerate(preview):
-            low = line.lower()
-            if 'running time' in low and ('displacement' in low):
-                header_line = i
-                break
+        header_line = _find_header_line(_read_preview_lines(file_path, n_lines=200))
         if header_line is not None:
-            new_skip = header_line + 2  # línea títulos + unidades
+            new_skip = header_line + 2  # línea de títulos + línea de unidades
             if new_skip != skiprows:
                 logger.info(f"Auto-detección encabezado: skiprows {skiprows} -> {new_skip}")
                 skiprows = new_skip
@@ -217,63 +239,41 @@ def import_data_text(
     last_error: Optional[Exception] = None
     df: pd.DataFrame | None = None
 
-    attempt_encodings = encodings_to_try[:max_retries + 1]
-    for attempt, encoding in enumerate(attempt_encodings):
+    read_kwargs = dict(
+        names=list(variable_names),
+        usecols=range(len(variable_names)),
+        sep=delimiter,
+        skiprows=skiprows,
+        engine='python',
+        on_bad_lines='skip',
+    )
+
+    for attempt, encoding in enumerate(encodings_to_try[:max_retries + 1]):
         try:
             logger.debug(f"Intento {attempt+1} lectura (encoding={encoding})")
-            # Intento directo
             try:
-                df = pd.read_csv(
-                    str(file_path),
-                    sep=delimiter if delimiter != '\\s+' else r'\s+',
-                    names=list(variable_names),
-                    usecols=range(len(variable_names)),
-                    dtype=dtype,
-                    skiprows=skiprows,
-                    encoding=encoding,
-                    engine='python',
-                    on_bad_lines='skip'
-                )
+                df = pd.read_csv(str(file_path), dtype=dtype, encoding=encoding, **read_kwargs)
             except ValueError as ve:
-                if coerce_numeric and 'Unable to convert column' in str(ve):
-                    col_problem = str(ve).split('column')[-1].strip()
-                    should_warn = (
-                        (not warned_conversion)
-                        and ((not warn_once) or _should_emit_conversion_warning_once())
-                    )
-                    if should_warn:
-                        logger.warning(f"Fallo conversión directa ({col_problem}). Reintentando con limpieza flexible.")
-                    warned_conversion = True
-                    df = pd.read_csv(
-                        str(file_path),
-                        sep=delimiter if delimiter != '\\s+' else r'\s+',
-                        names=list(variable_names),
-                        usecols=range(len(variable_names)),
-                        dtype=str,
-                        skiprows=skiprows,
-                        encoding=encoding,
-                        engine='python',
-                        on_bad_lines='skip'
-                    )
-                    if debug_sample:
-                        logger.debug("Muestra cruda:\n" + '\n'.join(df.head(5).astype(str).agg('\t'.join, axis=1)))
-                    # Limpieza por columna
-                    for col in df.columns:
-                        series = (df[col].astype(str)
-                                      .str.strip()
-                                      .str.replace('\u00a0', ' ', regex=False)
-                                      .str.replace(',', '.', regex=False)
-                                      .str.replace(r'[^0-9eE+\-\.]+', '', regex=True)
-                                 )
-                        series = series.replace('', np.nan)
-                        df[col] = pd.to_numeric(series, errors='coerce')
-                else:
+                if not (coerce_numeric and 'Unable to convert column' in str(ve)):
                     raise
-            logger.info(f"Datos importados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas (encoding={encoding})")
+                col_problem = str(ve).split('column')[-1].strip()
+                should_warn = (
+                    (not warned_conversion)
+                    and ((not warn_once) or _should_emit_conversion_warning_once())
+                )
+                if should_warn:
+                    logger.warning(f"Fallo conversión directa ({col_problem}). Reintentando con limpieza flexible.")
+                warned_conversion = True
+                df = pd.read_csv(str(file_path), dtype=str, encoding=encoding, **read_kwargs)
+                if debug_sample:
+                    logger.debug("Muestra cruda:\n" + '\n'.join(df.head(5).astype(str).agg('\t'.join, axis=1)))
+                for col in df.columns:
+                    df[col] = _clean_numeric_column(df[col])
+            logger.info(f"Datos importados: {df.shape[0]} filas, {df.shape[1]} columnas (encoding={encoding})")
             break
         except (UnicodeDecodeError, UnicodeError) as e:
             last_error = e
-            if attempt == len(attempt_encodings) - 1:
+            if attempt == max_retries:
                 logger.error(f"Error de encoding tras {attempt+1} intentos: {e}")
                 raise RuntimeError(f"Error de encoding: {e}")
             logger.warning(f"Encoding fallido ({encoding}), probando siguiente")
@@ -285,8 +285,9 @@ def import_data_text(
     if df is None:
         raise RuntimeError(f"No se pudo importar el archivo. Último error: {last_error}")
 
-    # Fallback si todo NaN
-    if (df.isna().all(axis=1)).mean() == 1.0:
+    # Fallback: si todo el DataFrame quedó NaN, reintento con auto-detección de sep
+    # delegada a pandas (sep=None, engine='python').
+    if df.isna().all(axis=1).mean() == 1.0:
         logger.warning("Todas las filas NaN tras coerción; intentando autodetección de separador")
         try:
             flex_df = pd.read_csv(
@@ -298,48 +299,30 @@ def import_data_text(
                 skiprows=skiprows,
                 engine='python',
                 encoding=encodings_to_try[0],
-                on_bad_lines='skip'
+                on_bad_lines='skip',
             )
             for col in flex_df.columns:
-                s = (flex_df[col].astype(str).str.strip().str.replace('\u00a0',' ',regex=False)
-                     .str.replace(',', '.', regex=False))
-                flex_df[col] = pd.to_numeric(s.replace('', np.nan), errors='coerce')
+                flex_df[col] = _clean_numeric_column(flex_df[col])
             if (~flex_df.isna().all(axis=1)).any():
                 df = flex_df
                 logger.info("Fallback flexible exitoso")
-        except Exception as fe:
+        except (OSError, pd.errors.ParserError, ValueError) as fe:
             logger.error(f"Fallback flexible falló: {fe}")
 
-    # Filtrado de filas
     if dropna:
         initial = len(df)
         df = df.dropna(how='all')
-        valid_counts = df.notna().sum(axis=1)
-        df = df[valid_counts >= min_valid_cols]
+        df = df[df.notna().sum(axis=1) >= min_valid_cols]
         removed = initial - len(df)
         if removed > 0:
             retention = (len(df) / initial * 100.0) if initial else 0.0
-            logger.info(f"Filtrado de filas: eliminadas {removed} (criterio: all-NaN o < {min_valid_cols} válidas) | Retención: {retention:.2f}% ({len(df)}/{initial})")
+            logger.info(
+                f"Filtrado de filas: eliminadas {removed} (all-NaN o < {min_valid_cols} válidas) "
+                f"| Retención: {retention:.2f}% ({len(df)}/{initial})"
+            )
 
-    # Auditoría
     if audit_log_dir and not df.empty:
-        try:
-            audit_dir = Path(audit_log_dir)
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            n = len(df)
-            sample_idx = []
-            sample_idx.extend(df.index[:audit_head].tolist())
-            if n > (audit_head + audit_tail):
-                mid_start = max(0, n//2 - audit_mid//2)
-                sample_idx.extend(df.index[mid_start: mid_start + audit_mid].tolist())
-            sample_idx.extend(df.index[-audit_tail:].tolist())
-            sample_idx = sorted(set(sample_idx))
-            audit_df = df.loc[sample_idx]
-            out_path = audit_dir / f"{file_path.stem}.audit.csv"
-            audit_df.to_csv(out_path, index=False)
-            logger.debug(f"Auditoría guardada: {out_path}")
-        except Exception as ae:
-            logger.debug(f"Auditoría no generada: {ae}")
+        _save_audit_sample(df, Path(audit_log_dir), file_path.stem, audit_head, audit_mid, audit_tail)
 
     if df.empty:
         logger.warning("DataFrame resultante está vacío")
@@ -495,6 +478,16 @@ def get_data_excel(
         wb.close()
 
 
+def _resolve_sheet(wb, sheet_name: str, create_sheet: bool):
+    """Devuelve la hoja ``sheet_name``, creándola si no existe y ``create_sheet``."""
+    if sheet_name in wb.sheetnames:
+        return wb[sheet_name]
+    if create_sheet:
+        logger.info(f"Creada nueva hoja: {sheet_name}")
+        return wb.create_sheet(title=sheet_name)
+    raise ValueError(f"La hoja '{sheet_name}' no existe y create_sheet=False.")
+
+
 def write_data_excel(
     file_path: Union[str, Path],
     sheet_name: str,
@@ -510,40 +503,24 @@ def write_data_excel(
         position: (fila, columna) 1-based.
         val: Valor a escribir.
         create_sheet: Crear la hoja si no existe.
-    
-    Example:
-        >>> write_data_excel('results.xlsx', 'Data', (1, 1), 42.5)
     """
     row, column = position
     if row < 1 or column < 1:
         raise ValueError("Las posiciones deben ser >= 1 (1-based indexing)")
     if not sheet_name.strip():
         raise ValueError("sheet_name no puede estar vacío")
-    
+
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
-    
+
     logger.debug(f"Escribiendo valor {val} en ({row}, {column}) de hoja '{sheet_name}'")
-    
+
     wb = xl.load_workbook(filename=str(file_path), keep_vba=True)
     try:
-        if sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-        else:
-            if create_sheet:
-                sheet = wb.create_sheet(title=sheet_name)
-                logger.info(f"Creada nueva hoja: {sheet_name}")
-            else:
-                raise ValueError(f"La hoja '{sheet_name}' no existe y create_sheet=False.")
-        
+        sheet = _resolve_sheet(wb, sheet_name, create_sheet)
         sheet.cell(row, column, value=val)
         wb.save(str(file_path))
-        logger.debug(f"Valor escrito y archivo guardado exitosamente")
-        
-    except Exception as e:
-        logger.error(f"Error escribiendo en Excel: {e}")
-        raise
     finally:
         wb.close()
 
@@ -554,59 +531,80 @@ def write_batch_excel(
     data: Sequence[Tuple[int, int, Any]],
     create_sheet: bool = True
 ) -> None:
-    """Escritura por lotes para mejorar rendimiento (abre/cierra una sola vez).
-    
+    """Escribe múltiples celdas en una misma hoja con una sola apertura del libro.
+
     Args:
         file_path: Ruta al archivo Excel.
         sheet_name: Nombre de la hoja destino.
-        data: Secuencia de tuplas (fila, columna, valor) para escribir.
+        data: Secuencia de tuplas ``(fila, columna, valor)``.
         create_sheet: Crear la hoja si no existe.
-    
-    Example:
-        >>> batch_data = [(1, 1, 'Fecha'), (1, 2, 'Fuerza'), (2, 1, '2023-01-01')]
-        >>> write_batch_excel('results.xlsx', 'Data', batch_data)
     """
     if not data:
         logger.warning("Lista de datos vacía, no se escribirá nada")
         return
-    
+
     if not sheet_name.strip():
         raise ValueError("sheet_name no puede estar vacío")
-    
-    # Validar formato de datos
+
     for i, item in enumerate(data):
         if not isinstance(item, (tuple, list)) or len(item) != 3:
             raise ValueError(f"Elemento {i} debe ser tupla (fila, columna, valor)")
         row, col, _ = item
         if row < 1 or col < 1:
             raise ValueError(f"Elemento {i}: posiciones deben ser >= 1 (1-based)")
-    
+
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
-    
+
     logger.info(f"Escribiendo {len(data)} valores en lote en hoja '{sheet_name}'")
-    
+
     wb = xl.load_workbook(filename=str(file_path), keep_vba=True)
     try:
-        if sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-        else:
-            if create_sheet:
-                sheet = wb.create_sheet(title=sheet_name)
-                logger.info(f"Creada nueva hoja: {sheet_name}")
-            else:
-                raise ValueError(f"La hoja '{sheet_name}' no existe y create_sheet=False.")
-        
+        sheet = _resolve_sheet(wb, sheet_name, create_sheet)
         for row, col, value in data:
             sheet.cell(row, col, value=value)
-        
         wb.save(str(file_path))
-        logger.info(f"Escritura en lote completada exitosamente")
-        
-    except Exception as e:
-        logger.error(f"Error en escritura por lotes: {e}")
-        raise
+    finally:
+        wb.close()
+
+
+def write_multisheet_excel(
+    file_path: Union[str, Path],
+    writes_by_sheet: "dict[str, Sequence[Tuple[int, int, Any]]]",
+    create_sheet: bool = True,
+) -> None:
+    """Escribe múltiples celdas repartidas en varias hojas con una sola apertura.
+
+    Args:
+        file_path: Ruta al archivo Excel.
+        writes_by_sheet: ``{sheet_name: [(row, col, value), ...]}``.
+        create_sheet: Crear la hoja si no existe.
+    """
+    if not writes_by_sheet:
+        logger.warning("writes_by_sheet vacío, no se escribirá nada")
+        return
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
+
+    total = sum(len(v) for v in writes_by_sheet.values())
+    logger.info(f"Escribiendo {total} celdas en {len(writes_by_sheet)} hoja(s)")
+
+    wb = xl.load_workbook(filename=str(file_path), keep_vba=True)
+    try:
+        for sheet_name, cells in writes_by_sheet.items():
+            if not cells:
+                continue
+            if not sheet_name.strip():
+                raise ValueError("sheet_name no puede estar vacío")
+            sheet = _resolve_sheet(wb, sheet_name, create_sheet)
+            for row, col, value in cells:
+                if row < 1 or col < 1:
+                    raise ValueError(f"Posiciones deben ser >= 1 (1-based): ({row}, {col})")
+                sheet.cell(row, col, value=value)
+        wb.save(str(file_path))
     finally:
         wb.close()
 

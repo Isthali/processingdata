@@ -19,7 +19,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
 from typing import List, Sequence, Union
 
-from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel
+from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel, write_multisheet_excel
 from edit_pdfs import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
 
 class Mechanical_test:
@@ -476,15 +476,17 @@ class Test_report:
         yield  # pragma: no cover — marca explícita de generator vacío
 
     def write_report(self):
-        """Escribe los resultados a Excel consumiendo ``_cell_writes`` por muestra."""
+        """Escribe los resultados a Excel consumiendo ``_cell_writes`` por muestra.
+
+        Recolecta todas las celdas agrupadas por hoja y delega en
+        ``write_multisheet_excel`` para abrir y guardar el libro una sola vez.
+        """
+        writes_by_sheet: dict = {}
         for i, test in enumerate(self.tests):
-            for sheet, position, value in self._cell_writes(i, test):
-                write_data_excel(
-                    file_path=self.excel_file,
-                    sheet_name=sheet,
-                    position=position,
-                    val=value,
-                )
+            for sheet, (row, col), value in self._cell_writes(i, test):
+                writes_by_sheet.setdefault(sheet, []).append((row, col, value))
+        if writes_by_sheet:
+            write_multisheet_excel(file_path=self.excel_file, writes_by_sheet=writes_by_sheet)
         return self.report_file
 
     def plot_report_data(self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_pag, final_pag=False):
