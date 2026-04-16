@@ -386,17 +386,43 @@ class Test_report:
         standard (str): Norma aplicada en la prueba.
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
+
+    Atributos de clase (sobre-escribibles por subclases):
+        report_extension: Extensión del archivo Excel ('xlsm' por defecto, 'xlsx' para genéricos).
+        _standards_map: Mapa {nombre_norma: lista_puntos_x} para ``set_defl_points``.
+            Si está vacío, ``set_defl_points`` levanta un error.
+        header_footer_pdf: Ruta al PDF de encabezado/pie (acreditado o no).
+        num_1plot_pag: Número de página del primer plot (controla el rango de
+            páginas exportadas desde Excel: ``pag_f = num_1plot_pag - 1``).
     """
-    def __init__(self):
-        self.repor_id = {'infle': 'infle', 'subinfle': 'subinfle'}
-        self.standard_test = 'standard'
-        self.folder_path = 'folder'
-        self.client_id = 'empresa'
-        self.samples_id = []
+
+    report_extension: str = 'xlsm'
+    _standards_map: dict = {}
+    header_footer_pdf: str = './formatos/formato_no_acreditado.pdf'
+    num_1plot_pag: int = 4
+
+    def __init__(
+        self,
+        infle=None,
+        subinfle=None,
+        folder=None,
+        standard=None,
+        client_id=None,
+        samples_id=None,
+    ):
+        self.repor_id = {'infle': infle, 'subinfle': subinfle}
+        self.standard_test = standard
+        self.folder_path = folder
+        self.client_id = client_id
+        self.samples_id = list(samples_id) if samples_id else []
         self.tests = []
         self.excel_file = 'excel_file'
         self.plots_file = 'plots_file'
         self.report_file = 'report_file'
+        self.defl_points = np.array([])
+        # Resuelve nombres de archivo (excel_file, plots_file, report_file) en base
+        # a los identificadores ya asignados.
+        self.set_report_files(extension=self.report_extension)
 
     def set_report_files(self, extension='xlsm'):
         """Configura los nombres de los archivos de informe."""
@@ -420,10 +446,45 @@ class Test_report:
         self.report_file = str(folder / pdf_name)
         return self.excel_file, self.report_file
     
+    def set_defl_points(self) -> np.ndarray:
+        """Configura ``self.defl_points`` a partir del estándar y ``_standards_map``.
+
+        Cada subclase declara ``_standards_map`` (atributo de clase) con la forma
+        ``{'NORMA': [puntos...]}``. Si la norma no está registrada, levanta ValueError.
+        """
+        if not self._standards_map:
+            raise ValueError(
+                f"{type(self).__name__} no define _standards_map; no se puede resolver puntos de deflexión."
+            )
+        points = self._standards_map.get(self.standard_test)
+        if not points:
+            raise ValueError(f"Norma no reconocida: {self.standard_test}")
+        self.defl_points = np.array(points)
+        return self.defl_points
+
     def add_tests(self):
         return self.tests
-    
+
+    def _cell_writes(self, i, test):
+        """Celdas a escribir para ``test`` (índice ``i``).
+
+        Yields tuplas ``(sheet_name, (row, col), value)``. La base no escribe nada;
+        cada subclase declara el layout propio — que es la única pieza específica
+        del template Excel — aquí.
+        """
+        return
+        yield  # pragma: no cover — marca explícita de generator vacío
+
     def write_report(self):
+        """Escribe los resultados a Excel consumiendo ``_cell_writes`` por muestra."""
+        for i, test in enumerate(self.tests):
+            for sheet, position, value in self._cell_writes(i, test):
+                write_data_excel(
+                    file_path=self.excel_file,
+                    sheet_name=sheet,
+                    position=position,
+                    val=value,
+                )
         return self.report_file
 
     def plot_report_data(self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_pag, final_pag=False):
@@ -520,7 +581,45 @@ class Test_report:
                     pdf_file.savefig(fig_test)
                     plt.close(fig_test)
 
+    def plot_spec(self) -> dict:
+        """Devuelve los kwargs para ``make_plot_report`` (sin ``num_1plot_pag``).
+
+        Las subclases concretas deben implementar este método con los textos, ejes
+        y banderas de comparativo propios del ensayo. La base no dibuja nada.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} debe implementar plot_spec() o sobreescribir make_report_file()."
+        )
+
     def make_report_file(self):
+        """Pipeline canónico de generación del reporte.
+
+        Orden: ``add_tests`` → ``write_report`` (escribe Excel) → ``convert_excel_to_pdf``
+        → ``make_plot_report`` (genera ``plots.pdf``) → ``merge_pdfs`` → normalización
+        de orientación → overlay de encabezado/pie. Las subclases parametrizan el
+        pipeline vía atributos de clase (``header_footer_pdf``, ``num_1plot_pag``)
+        y ``plot_spec()``.
+        """
+        self.add_tests()
+        self.write_report()
+        convert_excel_to_pdf(
+            excel_path=self.excel_file,
+            pdf_path=self.report_file,
+            pag_i=1,
+            pag_f=self.num_1plot_pag - 1,
+        )
+        self.make_plot_report(num_1plot_pag=self.num_1plot_pag, **self.plot_spec())
+        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
+        normalize_pdf_orientation(
+            input_pdf_path=self.report_file,
+            output_pdf_path=self.report_file,
+            desired_orientation='portrait',
+        )
+        apply_header_footer_pdf(
+            input_pdf_path=self.report_file,
+            header_footer_pdf_path=self.header_footer_pdf,
+            output_pdf_path=self.report_file,
+        )
         return self.report_file
 
 class Panel_toughness_test_report(Test_report):
@@ -535,29 +634,14 @@ class Panel_toughness_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        self.defl_points = np.array([])
-        super().set_report_files()
-    
-    def set_defl_points(self):
-        """Configura los puntos de deflexión según la norma."""
-        standards_map = {
-            'ASTMC1550': [5., 10., 20., 30., 40., 45.],
-            'EFNARC1996': [5., 10., 15., 20., 25., 30.],
-            'EFNARC1999': [5., 10., 15., 20., 25., 30.],
-            'EN14488-5': [5., 10., 15., 20., 25., 30.]
-        }
-        self.defl_points = np.array(standards_map.get(self.standard_test, []))
-        if self.defl_points.size == 0:
-            raise ValueError(f"Norma no reconocida: {self.standard_test}")
-        return self.defl_points
+
+    _standards_map = {
+        'ASTMC1550': [5., 10., 20., 30., 40., 45.],
+        'EFNARC1996': [5., 10., 15., 20., 25., 30.],
+        'EFNARC1999': [5., 10., 15., 20., 25., 30.],
+        'EN14488-5': [5., 10., 15., 20., 25., 30.],
+    }
+    num_1plot_pag = 4
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -570,50 +654,40 @@ class Panel_toughness_test_report(Test_report):
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
-    def write_report(self):
-        """Escribe los resultados en un archivo Excel."""
-        for i, test in enumerate(self.tests):
-            row_start = 5 * i + 18  # Posición inicial de la fila para cada prueba
-            defl_cps = test.defl_cps
-            for j, (deflection, load, toughness) in enumerate(zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])):
-                column = 4 + j
-                data = [load, deflection, toughness]
-                for offset, value in enumerate(data):
-                    write_data_excel(file_path=self.excel_file, sheet_name='Resultados', position=(row_start + offset, column), val=value)
+    def _cell_writes(self, i, test):
+        # Layout 'Resultados': bloque de 3 filas (load, deflection, toughness) por
+        # muestra, una columna por punto de deflexión.
+        SHEET = 'Resultados'
+        row_start = 5 * i + 18
+        defl_cps = test.defl_cps
+        for j, (deflection, load, toughness) in enumerate(
+            zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])
+        ):
+            col = 4 + j
+            yield SHEET, (row_start + 0, col), load
+            yield SHEET, (row_start + 1, col), deflection
+            yield SHEET, (row_start + 2, col), toughness
 
-    def make_report_file(self):
-        self.add_tests()
-        
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
-        x='Deflection'
-        y='Load'
-        xlim=(0, self.defl_points[-1])
-        ylim=(0, None)
-        title='Fuerza-Deflexión'
-        xlabel='Deflexión (mm)'
-        ylabel='Fuerza (kN)'
-        sample_name='PANEL'
-        test_name='ENSAYO DE TENACIDAD POR FLEXIÓN'
-        num_1plot_pag=4
-        comparative=True
-        x_comp='Deflection'
-        y_comp='Toughness'
-        xlim_comp=(0, self.defl_points[-1])
-        ylim_comp=(0, None)
-        title_comp='Energía-Deflexión'
-        xlabel_comp='Deflexión (mm)'
-        ylabel_comp='Energía (J)'       
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
-            comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
-            )
-        
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': 'Deflection',
+            'y': 'Load',
+            'xlim': (0, self.defl_points[-1]),
+            'ylim': (0, None),
+            'title': 'Fuerza-Deflexión',
+            'xlabel': 'Deflexión (mm)',
+            'ylabel': 'Fuerza (kN)',
+            'sample_name': 'PANEL',
+            'test_name': 'ENSAYO DE TENACIDAD POR FLEXIÓN',
+            'comparative': True,
+            'x_comp': 'Deflection',
+            'y_comp': 'Toughness',
+            'xlim_comp': (0, self.defl_points[-1]),
+            'ylim_comp': (0, None),
+            'title_comp': 'Energía-Deflexión',
+            'xlabel_comp': 'Deflexión (mm)',
+            'ylabel_comp': 'Energía (J)',
+        }
 
 class Panel_Beam_residual_strength_test_report(Test_report):
     """
@@ -627,27 +701,12 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        self.defl_points = np.array([])
-        super().set_report_files()
-    
-    def set_defl_points(self):
-        """Configura los puntos de deflexión según la norma."""
-        standards_map = {
-            'EN14651': [0.5, 1.5, 2.5, 3.5, 4.],
-            'EN14488': [0.5, 1.5, 2.5, 3.5, 4., 5.]
-        }
-        self.defl_points = np.array(standards_map.get(self.standard_test, []))
-        if self.defl_points.size == 0:
-            raise ValueError(f"Norma no reconocida: {self.standard_test}")
-        return self.defl_points
+
+    _standards_map = {
+        'EN14651': [0.5, 1.5, 2.5, 3.5, 4.],
+        'EN14488': [0.5, 1.5, 2.5, 3.5, 4., 5.],
+    }
+    num_1plot_pag = 5
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -669,50 +728,42 @@ class Panel_Beam_residual_strength_test_report(Test_report):
             test.preprocess_data(defl_points=self.defl_points, x_col='CMOD', include_extra_cols=['Deflection'])
             self.tests.append(test)
 
-    def write_report(self):
-        """Escribe los resultados en un archivo Excel."""
-        for i, test in enumerate(self.tests):
-            row_start = i + 19  # Posición inicial de la fila para cada prueba
-            defl_cps = test.defl_cps
-            for j, (load, deflection, cmod, toughness) in enumerate(zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['CMOD'], defl_cps['Toughness'])):
-                column = 20 + 4 * j
-                data = [1000*load, deflection, cmod, toughness]
-                for offset, value in enumerate(data):
-                    write_data_excel(file_path=self.excel_file, sheet_name='ResistenciaResidual', position=(row_start, column + offset), val=value)
+    def _cell_writes(self, i, test):
+        # Layout 'ResistenciaResidual' (CMOD): una fila por muestra, bloques de 4
+        # columnas (1000*load, deflection, cmod, toughness) por punto CMOD.
+        # Nota: la carga se escala ×1000 (kN → N) para la plantilla.
+        SHEET = 'ResistenciaResidual'
+        row = i + 19
+        defl_cps = test.defl_cps
+        for j, (load, deflection, cmod, toughness) in enumerate(
+            zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['CMOD'], defl_cps['Toughness'])
+        ):
+            col_start = 20 + 4 * j
+            yield SHEET, (row, col_start + 0), 1000 * load
+            yield SHEET, (row, col_start + 1), deflection
+            yield SHEET, (row, col_start + 2), cmod
+            yield SHEET, (row, col_start + 3), toughness
 
-    def make_report_file(self):
-        self.add_tests()
-        
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
-        x=["Deflection", "CMOD"]
-        y=["Load", "Load"]
-        xlim=[(0, self.defl_points[-1]), (0, None)]
-        ylim=[(0, None), (0, None)]
-        title=["Fuerza-Deflexión", "Fuerza-CMOD"]
-        xlabel=["Deflexión (mm)", "CMOD (mm)"]
-        ylabel=["Fuerza (kN)", "Fuerza (kN)"]
-        sample_name='VIGA'
-        test_name='ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN'
-        num_1plot_pag=5
-        comparative=True
-        x_comp='Deflection'
-        y_comp='Toughness'
-        xlim_comp=(0, self.defl_points[-1])
-        ylim_comp=(0, None)
-        title_comp='Energía-Deflexión'
-        xlabel_comp='Deflexión (mm)'
-        ylabel_comp='Energía (J)'       
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
-            comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
-            )
-        
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': ['Deflection', 'CMOD'],
+            'y': ['Load', 'Load'],
+            'xlim': [(0, self.defl_points[-1]), (0, None)],
+            'ylim': [(0, None), (0, None)],
+            'title': ['Fuerza-Deflexión', 'Fuerza-CMOD'],
+            'xlabel': ['Deflexión (mm)', 'CMOD (mm)'],
+            'ylabel': ['Fuerza (kN)', 'Fuerza (kN)'],
+            'sample_name': 'VIGA',
+            'test_name': 'ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN',
+            'comparative': True,
+            'x_comp': 'Deflection',
+            'y_comp': 'Toughness',
+            'xlim_comp': (0, self.defl_points[-1]),
+            'ylim_comp': (0, None),
+            'title_comp': 'Energía-Deflexión',
+            'xlabel_comp': 'Deflexión (mm)',
+            'ylabel_comp': 'Energía (J)',
+        }
 
 class Beam_residual_strength_test_report(Test_report):
     """
@@ -726,26 +777,11 @@ class Beam_residual_strength_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        self.defl_points = np.array([])
-        super().set_report_files()
-    
-    def set_defl_points(self):
-        """Configura los puntos de deflexión según la norma."""
-        standards_map = {
-            'ASTMC1609': [0.75, 3.]
-        }
-        self.defl_points = np.array(standards_map.get(self.standard_test, []))
-        if self.defl_points.size == 0:
-            raise ValueError(f"Norma no reconocida: {self.standard_test}")
-        return self.defl_points
+
+    _standards_map = {
+        'ASTMC1609': [0.75, 3.],
+    }
+    num_1plot_pag = 4
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -767,50 +803,41 @@ class Beam_residual_strength_test_report(Test_report):
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
-    def write_report(self):
-        """Escribe los resultados en un archivo Excel."""
-        for i, test in enumerate(self.tests):
-            row_start = i + 19  # Posición inicial de la fila para cada prueba
-            defl_cps = test.defl_cps
-            for j, (load, deflection, toughness) in enumerate(zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['Toughness'])):
-                column = 21 + 3 * j
-                data = [1000*load, deflection, toughness]
-                for offset, value in enumerate(data):
-                    write_data_excel(file_path=self.excel_file, sheet_name='ResistenciaResidual', position=(row_start, column + offset), val=value)
+    def _cell_writes(self, i, test):
+        # Layout 'ResistenciaResidual' (deflexión, ASTM C1609): una fila por muestra,
+        # bloques de 3 columnas (1000*load, deflection, toughness) por punto.
+        # Nota: la carga se escala ×1000 (kN → N) para la plantilla.
+        SHEET = 'ResistenciaResidual'
+        row = i + 19
+        defl_cps = test.defl_cps
+        for j, (load, deflection, toughness) in enumerate(
+            zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['Toughness'])
+        ):
+            col_start = 21 + 3 * j
+            yield SHEET, (row, col_start + 0), 1000 * load
+            yield SHEET, (row, col_start + 1), deflection
+            yield SHEET, (row, col_start + 2), toughness
 
-    def make_report_file(self):
-        self.add_tests()
-        
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
-        x='Deflection'
-        y='Load'
-        xlim=(0, self.defl_points[-1])
-        ylim=(0, None)
-        title='Fuerza-Deflexión'
-        xlabel='Deflexión (mm)'
-        ylabel='Fuerza (kN)'
-        sample_name='VIGA'
-        test_name='ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN'
-        num_1plot_pag=4
-        comparative=True
-        x_comp='Deflection'
-        y_comp='Toughness'
-        xlim_comp=(0, self.defl_points[-1])
-        ylim_comp=(0, None)
-        title_comp='Energía-Deflexión'
-        xlabel_comp='Deflexión (mm)'
-        ylabel_comp='Energía (J)'       
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag,
-            comparative=comparative, x_comp=x_comp, y_comp=y_comp, xlim_comp=xlim_comp, ylim_comp=ylim_comp, title_comp=title_comp, xlabel_comp=xlabel_comp, ylabel_comp=ylabel_comp
-            )
-        
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': 'Deflection',
+            'y': 'Load',
+            'xlim': (0, self.defl_points[-1]),
+            'ylim': (0, None),
+            'title': 'Fuerza-Deflexión',
+            'xlabel': 'Deflexión (mm)',
+            'ylabel': 'Fuerza (kN)',
+            'sample_name': 'VIGA',
+            'test_name': 'ENSAYO DE RESISTENCIA RESIDUAL EN FLEXIÓN',
+            'comparative': True,
+            'x_comp': 'Deflection',
+            'y_comp': 'Toughness',
+            'xlim_comp': (0, self.defl_points[-1]),
+            'ylim_comp': (0, None),
+            'title_comp': 'Energía-Deflexión',
+            'xlabel_comp': 'Deflexión (mm)',
+            'ylabel_comp': 'Energía (J)',
+        }
 
 class Axial_compression_test_report(Test_report):
     """
@@ -824,15 +851,9 @@ class Axial_compression_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        super().set_report_files()
+
+    header_footer_pdf = './formatos/formato_acreditado.pdf'
+    num_1plot_pag = 5
 
     def add_tests(self):
         for id in self.samples_id:
@@ -843,41 +864,22 @@ class Axial_compression_test_report(Test_report):
             test.preprocess_data()
             self.tests.append(test)
     
-    def write_report(self):
-        for i, test in enumerate(self.tests):
-            row = i+16
-            column = 23
-            write_data_excel(file_path=self.excel_file, sheet_name='Cores', position=(row, column), val=test.get_max_load())
-            #column = 2
-            #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_area_section(cell=(1, 1)))
-            #column = 3
-            #write_data_excel(file_path=self.report_file, sheet_idx=1, position=(row, column), val=test.get_strength())
+    def _cell_writes(self, i, test):
+        yield 'Cores', (i + 16, 23), test.get_max_load()
     
-    def make_report_file(self):
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
-        x='Displacement'
-        y='Load'
-        xlim=(0, None)
-        ylim=(0, None)
-        title='Fuerza-Desplazamiento'
-        xlabel='Desplazamiento (mm)'
-        ylabel='Fuerza (kN)'
-        sample_name='CORE'
-        test_name='ENSAYO DE RESISTENCIA A LA COMPRESIÓN'
-        num_1plot_pag=5
-        comparative=False
-
-        self.add_tests()
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
-            comparative=comparative
-            )
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': 'Displacement',
+            'y': 'Load',
+            'xlim': (0, None),
+            'ylim': (0, None),
+            'title': 'Fuerza-Desplazamiento',
+            'xlabel': 'Desplazamiento (mm)',
+            'ylabel': 'Fuerza (kN)',
+            'sample_name': 'CORE',
+            'test_name': 'ENSAYO DE RESISTENCIA A LA COMPRESIÓN',
+            'comparative': False,
+        }
 
 class Tapa_buzon_flexion_test_report(Test_report):
     """
@@ -891,15 +893,9 @@ class Tapa_buzon_flexion_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        super().set_report_files()
+
+    header_footer_pdf = './formatos/formato_acreditado.pdf'
+    num_1plot_pag = 4
 
     def add_tests(self):
         for id in self.samples_id:
@@ -908,37 +904,22 @@ class Tapa_buzon_flexion_test_report(Test_report):
             test.preprocess_data()
             self.tests.append(test)
     
-    def write_report(self):
-        for i, test in enumerate(self.tests):
-            row = 3*i+26
-            column = 17
-            write_data_excel(file_path=self.excel_file, sheet_name='Tapa C°A°', position=(row, column), val=test.get_max_load())
+    def _cell_writes(self, i, test):
+        yield 'Tapa C°A°', (3 * i + 26, 17), test.get_max_load()
     
-    def make_report_file(self):
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
-        x='Time'
-        y='Load'
-        xlim=(0, None)
-        ylim=(0, None)
-        title='Fuerza'
-        xlabel='Tiempo (seg)'
-        ylabel='Fuerza (kN)'
-        sample_name='TAPA'
-        test_name='ENSAYO DE RESISTENCIA AL TRÁNSITO'
-        num_1plot_pag=4
-        comparative=False
-
-        self.add_tests()
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
-            comparative=comparative
-            )
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': 'Time',
+            'y': 'Load',
+            'xlim': (0, None),
+            'ylim': (0, None),
+            'title': 'Fuerza',
+            'xlabel': 'Tiempo (seg)',
+            'ylabel': 'Fuerza (kN)',
+            'sample_name': 'TAPA',
+            'test_name': 'ENSAYO DE RESISTENCIA AL TRÁNSITO',
+            'comparative': False,
+        }
 
 class Beam_flexion_test_report(Test_report):
     """
@@ -952,15 +933,9 @@ class Beam_flexion_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        super().set_report_files()
+
+    header_footer_pdf = './formatos/formato_acreditado.pdf'
+    num_1plot_pag = 4
 
     def add_tests(self):
         for id in self.samples_id:
@@ -969,37 +944,22 @@ class Beam_flexion_test_report(Test_report):
             test.preprocess_data()
             self.tests.append(test)
 
-    def write_report(self):
-        for i, test in enumerate(self.tests):
-            row = i+16
-            column = 17
-            write_data_excel(file_path=self.excel_file, sheet_name='Vigas', position=(row, column), val=test.get_max_load())
+    def _cell_writes(self, i, test):
+        yield 'Vigas', (i + 16, 17), test.get_max_load()
 
-    def make_report_file(self):
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_acreditado.pdf'
-        x='Deflection'
-        y='Load'
-        xlim=(0, None)
-        ylim=(0, None)
-        title='Fuerza-Deflexión'
-        xlabel='Deflexión (mm)'
-        ylabel='Fuerza (kN)'
-        sample_name='VIGA'
-        test_name='ENSAYO DE FLEXIÓN'
-        num_1plot_pag=4
-        comparative=False
-
-        self.add_tests()
-        self.write_report()
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=1, pag_f=num_1plot_pag-1)
-        self.make_plot_report(
-            x=x, y=y, xlim=xlim, ylim=ylim, title=title, xlabel=xlabel, ylabel=ylabel, sample_name=sample_name, test_name=test_name, num_1plot_pag=num_1plot_pag, final_pag=False,
-            comparative=comparative
-            )
-        merge_pdfs(pdf_list=[self.report_file, self.plots_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    def plot_spec(self) -> dict:
+        return {
+            'x': 'Deflection',
+            'y': 'Load',
+            'xlim': (0, None),
+            'ylim': (0, None),
+            'title': 'Fuerza-Deflexión',
+            'xlabel': 'Deflexión (mm)',
+            'ylabel': 'Fuerza (kN)',
+            'sample_name': 'VIGA',
+            'test_name': 'ENSAYO DE FLEXIÓN',
+            'comparative': False,
+        }
 
 class Generate_test_report(Test_report):
     """
@@ -1013,22 +973,30 @@ class Generate_test_report(Test_report):
         client_id (str): Nombre de la empresa que realiza la prueba.
         samples_id (list): Identificadores de las muestras.
     """
-    def __init__(self, infle=None, subinfle=None, folder=None, standard=None, client_id=None, samples_id=None):
-        super().__init__()
-        self.repor_id = {'infle': infle, 'subinfle': subinfle}
-        self.standard_test = standard
-        self.folder_path = folder
-        self.client_id = client_id
-        self.samples_id = samples_id or []
-        self.tests = []
-        super().set_report_files(extension='xlsx')
-    
-    def make_report_file(self):
-        """Genera el archivo de informe final."""
-        header_footer_pdf_path = f'./formatos/formato_no_acreditado.pdf'
 
-        convert_excel_to_pdf(excel_path=self.excel_file, pdf_path=self.report_file, pag_i=0, pag_f=0)
-        #merge_pdfs(pdf_list=[self.report_file], output_pdf=self.report_file)
-        normalize_pdf_orientation(input_pdf_path=self.report_file, output_pdf_path=self.report_file, desired_orientation='portrait')
-        apply_header_footer_pdf(input_pdf_path=self.report_file, header_footer_pdf_path=header_footer_pdf_path, output_pdf_path=self.report_file)
+    report_extension = 'xlsx'
+
+    def make_report_file(self):
+        """Flujo especial: sólo conversión Excel→PDF + overlay (sin plots ni merge).
+
+        Usa ``pag_i=0, pag_f=0`` para exportar todo el libro. No llama a ``add_tests``
+        ni ``write_report``: el Excel ya viene preparado por el usuario.
+        """
+        convert_excel_to_pdf(
+            excel_path=self.excel_file,
+            pdf_path=self.report_file,
+            pag_i=0,
+            pag_f=0,
+        )
+        normalize_pdf_orientation(
+            input_pdf_path=self.report_file,
+            output_pdf_path=self.report_file,
+            desired_orientation='portrait',
+        )
+        apply_header_footer_pdf(
+            input_pdf_path=self.report_file,
+            header_footer_pdf_path=self.header_footer_pdf,
+            output_pdf_path=self.report_file,
+        )
+        return self.report_file
 
