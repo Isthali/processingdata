@@ -29,11 +29,18 @@ debe contener:
    | Subcomando        | Archivo por muestra                         | Columnas                                 |
    |-------------------|---------------------------------------------|------------------------------------------|
    | `cores`           | `{infle}-d{id}.xlsx`                        | Time, Displacement, Load                 |
+   | `cores_local`     | `{infle}-d{id}.xlsx`                        | Time, Load, Displacement, SG1, SG2, SG3 (SG en µε) |
    | `panels`          | `Losa P{id}.xlsx`                           | Time, Load, Deflection, Displacement     |
    | `panels_residual` | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, CMOD, Deflection |
    | `beams_residual`  | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, Deflection, Deflection2 |
    | `tapas`           | `tapas_{id}.xlsx`                           | Time, Load                               |
    | `generic`         | (sin datos crudos — sólo la plantilla)      | —                                        |
+
+   Para `cores` y `cores_local` el **diámetro de cada probeta (mm) se lee del
+   propio template** en la celda `'Cores'!F{i+16}` (1ª muestra → F16, 2ª → F17,
+   etc.). Si la celda está vacía o ≤ 0, el script aborta. La resistencia se
+   escribe en columna **N (MPa)** y **O (kgf/cm²)** de la misma fila; la carga
+   máxima en la columna **W (kN)**.
 
 Si la plantilla o los archivos de datos no existen, el error aparece al momento
 de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
@@ -43,6 +50,7 @@ de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
 | Subcomando        | Ensayo                                             | Estándar por defecto | Estándares disponibles                          | n por defecto | Cliente por defecto |
 |-------------------|----------------------------------------------------|----------------------|-------------------------------------------------|---------------|---------------------|
 | `cores`           | Compresión axial de testigos                       | `CORES`              | libre                                           | 6             | `PRODIMIN`          |
+| `cores_local`     | Compresión axial instrumentada con 3 strain gauges (esfuerzo-deformación) | `CORES`              | libre                                           | 3             | `PRODIMIN`          |
 | `panels`          | Tenacidad de paneles (ASTM C1550, EFNARC, EN 14488-5) | `EFNARC1996`         | `ASTMC1550`, `EFNARC1996`, `EFNARC1999`, `EN14488-5` | 3             | `PRODIMIN`          |
 | `panels_residual` | Resistencia residual con CMOD (EN 14651 / EN 14488) | `EN14488`            | `EN14651`, `EN14488`                            | 3             | `PRODIMIN`          |
 | `beams_residual`  | Resistencia residual de vigas (ASTM C1609)         | `ASTMC1609`          | `ASTMC1609`                                     | 3             | `PRODIMIN`          |
@@ -92,6 +100,18 @@ python unified_report.py cores --infle 336-24 --subinfle S
 python unified_report.py cores --infle 336-24 --subinfle S \
     --n 8 --offset 3 --base-dir D:/Reportes/Testigos
 ```
+
+### Compresión axial con strain gauges (esfuerzo-deformación)
+
+```bash
+# 3 testigos instrumentados con SG1/SG2/SG3 (µε)
+python unified_report.py cores_local --infle 336-24 --subinfle S --n 3
+```
+
+El archivo de datos por probeta es `{infle}-d{id}.xlsx` con columnas
+`Time, Load, Displacement, SG1, SG2, SG3` (las SG en microdeformación). El
+informe agrega un segundo gráfico Esfuerzo–Deformación además del usual
+Fuerza–Desplazamiento, con esfuerzo en MPa y deformación unitaria (mm/mm).
 
 ### Tenacidad de paneles
 

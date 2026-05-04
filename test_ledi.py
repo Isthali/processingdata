@@ -1,26 +1,32 @@
-"""Herramientas para procesar y generar reportes de ensayos mecánicos.
+"""Procesamiento de ensayos mecánicos y generación de reportes en PDF.
 
-Principales mejoras aplicadas respecto a la versión original:
-    - Corrección de errores de sintaxis en f-strings con diccionarios.
-    - Corrección de bug en get_min_load que devolvía maxLoad.
-    - Manejo seguro de parámetros mutables (listas) en constructores.
-    - Pequeñas validaciones y mensajes de advertencia.
-    - Tipos y docstrings breves para facilitar mantenimiento.
-    - Uso de pathlib para construir rutas (más robusto en Windows / Linux).
+Define dos jerarquías paralelas:
+
+* ``Mechanical_test`` y subclases — una instancia por probeta. Cargan datos
+  crudos, calculan carga máxima, tenacidad acumulada, primer pico y puntos
+  característicos interpolados.
+* ``Test_report`` y subclases — una instancia por corrida. Orquestan el
+  pipeline ``add_tests`` → ``write_report`` (volcado celda a celda al template
+  Excel) → ``convert_excel_to_pdf`` → ``make_plot_report`` → ``merge_pdfs`` →
+  normalización de orientación → overlay de encabezado/pie.
 """
 
 from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import List, Sequence, Union
 
 import numpy as np
 import scipy as sp
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-from pathlib import Path
-from typing import List, Sequence, Union
 
-from test_data import import_data_text, import_data_excel, get_data_excel, write_data_excel, write_multisheet_excel
+from test_data import import_data_text, import_data_excel, get_data_excel, write_multisheet_excel
 from edit_pdfs import convert_excel_to_pdf, merge_pdfs, normalize_pdf_orientation, apply_header_footer_pdf
+
+logger = logging.getLogger(__name__)
 
 class Mechanical_test:
     """Clase base para ensayos mecánicos."""
@@ -54,58 +60,55 @@ class Mechanical_test:
         elif data_source == 'xlsx':
             self.data = import_data_excel(file_path=str(self.data_file), sheet_idx=0, variable_names=variable_names)
         else:
-            raise ValueError("Error: data_source no reconocido (use 'csv' o 'xlsx').")
+            raise ValueError("data_source no reconocido (use 'csv' o 'xlsx').")
         if self.data.empty:
-            print("Advertencia: el DataFrame está vacío tras la importación.")
+            logger.warning("DataFrame vacío tras la importación de %s", self.data_file)
         return self.data
-            
+
     def make_positive_data(self, columns: Sequence[str] | None = None) -> pd.DataFrame:
         """Convierte columnas numéricas a su valor absoluto (útil cuando el sentido del sensor invierte signo)."""
         if self.data.empty:
             raise ValueError("No hay datos cargados para procesar.")
-        columns = list(columns) if columns is not None else list(self.data.columns)
-        for col in columns:
-            if col in self.data.columns:
-                self.data[col] = np.abs(self.data[col])
+        cols = [c for c in (columns or self.data.columns) if c in self.data.columns]
+        self.data[cols] = self.data[cols].abs()
         return self.data
-    
+
     def get_max_load(self) -> float:
+        """Devuelve la carga máxima (en valor absoluto) y registra su índice."""
         if self.data.empty:
-            raise ValueError("Error: cargue datos antes de calcular la carga máxima.")
-        self.idx['maxLoad'] = int(np.argmax(np.abs(self.data['Load'].to_numpy())))
-        # Se usa el valor absoluto para consistencia con índice.
-        self.maxLoad = float(np.max(np.abs(self.data['Load'].to_numpy())))
+            raise ValueError("Cargue datos antes de calcular la carga máxima.")
+        loads = self.data['Load'].abs()
+        self.idx['maxLoad'] = int(loads.values.argmax())
+        self.maxLoad = float(loads.max())
         return self.maxLoad
-    
+
     def get_min_load(self) -> float:
+        """Devuelve la carga mínima (en valor absoluto) y registra su índice."""
         if self.data.empty:
-            raise ValueError("Error: cargue datos antes de calcular la carga mínima.")
-        self.idx['minLoad'] = int(np.argmin(np.abs(self.data['Load'].to_numpy())))
-        self.minLoad = float(np.min(np.abs(self.data['Load'].to_numpy())))
+            raise ValueError("Cargue datos antes de calcular la carga mínima.")
+        loads = self.data['Load'].abs()
+        self.idx['minLoad'] = int(loads.values.argmin())
+        self.minLoad = float(loads.min())
         return self.minLoad
-    
+
     def get_interp_data(self, x_name: str, y_name: str, x_new_values: np.ndarray) -> np.ndarray:
         """Interpola valores Y para nuevos valores X usando interpolación lineal."""
-        x = self.data[x_name].to_numpy()
-        y = self.data[y_name].to_numpy()
-        y_new_values = np.interp(x_new_values, x, y)
-        return y_new_values
+        return np.interp(x_new_values, self.data[x_name].to_numpy(), self.data[y_name].to_numpy())
 
-    def plot_data(self, x, y, xlim, ylim, title, xlabel, ylabel, legend, report_id, test_name, num_pag, final_pag=False, superposed=False):
+    def plot_data(
+        self,
+        x, y, xlim, ylim, title, xlabel, ylabel, legend,
+        report_id, test_name, num_pag,
+        final_pag: bool = False,
+        superposed: bool = False,
+    ):
+        """Genera la figura individual de una probeta. Devuelve ``(fig, ax)``."""
         fig, ax = plt.subplots(figsize=(11.7, 8.3))
         if superposed:
-            # Trazar múltiples curvas en el mismo gráfico
             for i, (x_vals, y_vals) in enumerate(zip(x, y)):
-                ax.plot(
-                    self.data_process[x_vals], 
-                    self.data_process[y_vals], 
-                    label=legend[i], 
-                    linewidth=2
-                )
+                ax.plot(self.data_process[x_vals], self.data_process[y_vals], label=legend[i], linewidth=2)
         else:
-            # Trazar una única curva
             ax.plot(self.data_process[x], self.data_process[y], 'b-', label=legend[0], linewidth=2)
-        # Configuración común del gráfico
         ax.set(xlim=xlim, ylim=ylim)
         ax.set_title(title, fontsize=10)
         ax.set_xlabel(xlabel, fontsize=9)
@@ -114,7 +117,6 @@ class Mechanical_test:
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
         ax.set_position([0.10, 0.15, 0.75, 0.75])
-        # Texto adicional en el gráfico
         fig.text(0.05, 0.05, f"INF-LE {report_id}", fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
         fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')
@@ -128,42 +130,51 @@ class Mechanical_test:
 
 class Resistance_mechanical_test(Mechanical_test):
     """Ensayo mecánico de resistencia con procesamiento de datos hasta punto de caída."""
-    
+
     def __init__(self):
         super().__init__()
         self.idx = {'i': 0, 'f': 0, 'maxLoad': 0}
 
     def preprocess_data(self) -> dict:
-        """Preprocesa datos de resistencia: normaliza y define rango del 1% al 75% de carga máxima."""
+        """Normaliza datos y define el rango del 1% al 75% de la carga máxima."""
         super().make_positive_data()
         super().get_max_load()
         imaxP = self.idx['maxLoad']
-        self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
-        self.idx['f'] = np.argmin(np.abs(self.data.loc[imaxP:, 'Load'].to_numpy() - 0.75 * self.maxLoad)) + imaxP
+        loads = self.data['Load'].to_numpy()
+        self.idx['i'] = int(np.argmin(np.abs(loads[:imaxP + 1] - 0.01 * self.maxLoad)))
+        self.idx['f'] = int(np.argmin(np.abs(loads[imaxP:] - 0.75 * self.maxLoad))) + imaxP
         self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
         return self.idx
 
 class Toughness_mechanical_test(Mechanical_test):
     """Ensayo mecánico de tenacidad con cálculo de energía y detección de picos."""
-    
+
     def __init__(self):
         super().__init__()
-        self.idx = {'i': 0, 'f': 0, 'iL':0, 'maxLoad': 0}
+        self.idx = {'i': 0, 'f': 0, 'iL': 0, 'maxLoad': 0}
         self.defl_cps = pd.DataFrame()
 
     def get_toughness(self) -> pd.Series:
         """Calcula la tenacidad como integral acumulativa de fuerza vs deflexión."""
-        toughness = sp.integrate.cumulative_trapezoid(y=self.data['Load'].to_numpy(), x=self.data['Deflection'].to_numpy(), initial=0)
-        self.data['Toughness'] = toughness
+        self.data['Toughness'] = sp.integrate.cumulative_trapezoid(
+            y=self.data['Load'].to_numpy(),
+            x=self.data['Deflection'].to_numpy(),
+            initial=0,
+        )
         return self.data['Toughness']
-    
+
     def get_first_peak(self) -> int:
         """Detecta el primer pico significativo en la curva de carga."""
-        peaks, _ = sp.signal.find_peaks(x=self.data['Load'].to_numpy(), height=0.5*self.maxLoad, prominence=0.05*self.maxLoad, width=10)
+        peaks, _ = sp.signal.find_peaks(
+            x=self.data['Load'].to_numpy(),
+            height=0.5 * self.maxLoad,
+            prominence=0.05 * self.maxLoad,
+            width=10,
+        )
         if len(peaks) == 0 or peaks[0] > self.idx['maxLoad']:
             self.idx['iL'] = self.idx['maxLoad']
         else:
-            self.idx['iL'] = peaks[0]
+            self.idx['iL'] = int(peaks[0])
         return self.idx['iL']
     
     def get_defl_cps(
@@ -219,7 +230,7 @@ class Toughness_mechanical_test(Mechanical_test):
         x_col: str = 'Deflection',
         include_extra_cols: Sequence[str] | None = None,
     ) -> dict:
-        """Preprocesa datos de tenacidad: normaliza, calcula tenacidad y puntos característicos.
+        """Normaliza datos, calcula tenacidad y puntos característicos.
 
         Args:
             defl_points: Puntos del eje x (en unidades de ``x_col``) donde evaluar cps.
@@ -233,8 +244,9 @@ class Toughness_mechanical_test(Mechanical_test):
         self.get_toughness()
         self.get_first_peak()
         imaxP = self.idx['maxLoad']
-        self.idx['i'] = np.argmin(np.abs(self.data.loc[:imaxP, 'Load'].to_numpy() - 0.01 * self.maxLoad))
-        self.idx['f'] = len(self.data)-1
+        loads = self.data['Load'].to_numpy()
+        self.idx['i'] = int(np.argmin(np.abs(loads[:imaxP + 1] - 0.01 * self.maxLoad)))
+        self.idx['f'] = len(self.data) - 1
         self.data_process = self.data.loc[self.idx['i']:, :]
         self.get_defl_cps(x_points=defl_points, x_col=x_col, include_extra_cols=include_extra_cols)
         return self.idx
@@ -269,12 +281,44 @@ class Axial_compression_test(Resistance_mechanical_test):
         return self.area_sec
     
     def get_strength(self) -> float:
-        """Calcula la resistencia dividiendo carga máxima por área de sección."""
+        """Calcula la columna de esfuerzo (``Stress``, MPa) y la resistencia máxima.
+
+        Asume ``Load`` en kN y ``area_sec`` en mm² (diámetro/lado en mm), por lo
+        que ``Stress = 1000 * |Load| / area_sec`` queda en MPa. ``self.strength``
+        es el máximo de esa columna.
+        """
         if self.area_sec <= 0:
             raise ValueError("Área de sección debe ser calculada primero y mayor que 0.")
-        self.strength = self.maxLoad / self.area_sec
+        if self.data.empty or 'Load' not in self.data.columns:
+            raise ValueError("Cargue datos con columna 'Load' antes de calcular la resistencia.")
+        self.data['Stress'] = 1000.0 * self.data['Load'].abs() / self.area_sec
+        self.strength = float(self.data['Stress'].max())
         return self.strength
-    
+
+    def get_strain(
+        self,
+        gauge_cols: Sequence[str] = ('SG1', 'SG2', 'SG3'),
+        microstrain: bool = True,
+    ) -> pd.Series:
+        """Promedia 2-3 strain gauges y guarda la deformación unitaria en ``Strain``.
+
+        Args:
+            gauge_cols: Nombres de las columnas con lecturas de strain gauges.
+            microstrain: Si True, divide por 1e6 (µε → mm/mm).
+        """
+        if self.data.empty:
+            raise ValueError("Cargue datos antes de calcular la deformación.")
+        cols = [c for c in gauge_cols if c in self.data.columns]
+        if not cols:
+            raise ValueError(
+                f"Ninguna columna de {list(gauge_cols)} encontrada. Disponibles: {self.data.columns.tolist()}"
+            )
+        avg = self.data[cols].abs().mean(axis=1)
+        if microstrain:
+            avg = avg / 1e6
+        self.data['Strain'] = avg
+        return self.data['Strain']
+
 class Flexion_test(Resistance_mechanical_test):
     """Ensayo de flexión con cálculo de momento flector y resistencia."""
     
@@ -465,15 +509,28 @@ class Test_report:
     def add_tests(self):
         return self.tests
 
+    def _load_specimen_dat(self, test, variable_names: Sequence[str]) -> pd.DataFrame:
+        """Carga ``test.data`` desde ``specimen.dat`` (ensayos residuales)."""
+        test.data = import_data_text(
+            file_path=str(test.data_file),
+            delimiter='auto',
+            variable_names=variable_names,
+            debug_sample=False,
+            auto_detect_header=True,
+            min_valid_cols=3,
+            warn_once=True,
+            audit_log_dir=str(Path(self.folder_path) / "audits"),
+        )
+        return test.data
+
     def _cell_writes(self, i, test):
         """Celdas a escribir para ``test`` (índice ``i``).
 
-        Yields tuplas ``(sheet_name, (row, col), value)``. La base no escribe nada;
-        cada subclase declara el layout propio — que es la única pieza específica
-        del template Excel — aquí.
+        Cada subclase declara aquí el layout específico del template Excel
+        emitiendo tuplas ``(sheet_name, (row, col), value)``. La base no escribe
+        nada — devuelve un iterador vacío.
         """
-        return
-        yield  # pragma: no cover — marca explícita de generator vacío
+        return iter(())
 
     def write_report(self):
         """Escribe los resultados a Excel consumiendo ``_cell_writes`` por muestra.
@@ -489,12 +546,21 @@ class Test_report:
             write_multisheet_excel(file_path=self.excel_file, writes_by_sheet=writes_by_sheet)
         return self.report_file
 
-    def plot_report_data(self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_pag, final_pag=False):
+    def plot_report_data(
+        self,
+        x, y, xlim, ylim, title, xlabel, ylabel,
+        sample_name, test_name, num_pag,
+        final_pag: bool = False,
+    ):
+        """Genera la figura comparativa que superpone todas las probetas."""
         fig, ax = plt.subplots(figsize=(11.7, 8.3))
-        legends = [f'{sample_name} {test.get_sample_id()}' for test in self.tests]
-        for i, test in enumerate(self.tests):
-            data = test.data_process
-            ax.plot(data[x], data[y], label=legends[i], linewidth=2)
+        for test in self.tests:
+            ax.plot(
+                test.data_process[x],
+                test.data_process[y],
+                label=f'{sample_name} {test.get_sample_id()}',
+                linewidth=2,
+            )
         ax.set(xlim=xlim, ylim=ylim)
         ax.set_title(title, fontsize=10)
         ax.set_xlabel(xlabel, fontsize=9)
@@ -511,75 +577,69 @@ class Test_report:
         return fig, ax
 
     def make_plot_report(
-            self, x, y, xlim, ylim, title, xlabel, ylabel, sample_name, test_name, num_1plot_pag, final_pag=False,
-            comparative=False, x_comp=None, y_comp=None, xlim_comp=None, ylim_comp=None, title_comp=None, xlabel_comp=None, ylabel_comp=None):
-        """Genera gráficos de los resultados."""
+        self,
+        x, y, xlim, ylim, title, xlabel, ylabel,
+        sample_name, test_name, num_1plot_pag,
+        final_pag: bool = False,
+        comparative: bool = False,
+        x_comp=None, y_comp=None, xlim_comp=None, ylim_comp=None,
+        title_comp=None, xlabel_comp=None, ylabel_comp=None,
+    ):
+        """Genera el PDF de gráficos de la corrida (un gráfico por probeta y eje).
+
+        Si ``comparative`` es True, antepone una página con todas las probetas
+        superpuestas usando los kwargs ``*_comp``. Los parámetros ``x``/``y``/
+        ``xlim``/``ylim``/``title``/``xlabel``/``ylabel`` aceptan ya sea un
+        valor escalar (un único gráfico por probeta) o una lista (varios
+        gráficos por probeta); todas las listas deben tener la misma longitud.
+        """
         with PdfPages(self.plots_file) as pdf_file:
             if comparative:
                 fig_report, _ = self.plot_report_data(
-                    x=x_comp,
-                    y=y_comp,
-                    xlim=xlim_comp,
-                    ylim=ylim_comp,
-                    title=title_comp,
-                    xlabel=xlabel_comp,
-                    ylabel=ylabel_comp,
+                    x=x_comp, y=y_comp,
+                    xlim=xlim_comp, ylim=ylim_comp,
+                    title=title_comp, xlabel=xlabel_comp, ylabel=ylabel_comp,
                     sample_name=sample_name,
                     test_name=test_name,
                     num_pag=num_1plot_pag,
-                    final_pag=final_pag
-                    )
+                    final_pag=final_pag,
+                )
                 pdf_file.savefig(fig_report)
                 plt.close(fig_report)
                 num_1plot_pag += 1
-            
-            # Handle both string and list inputs for plotting parameters
-            x_list = x if isinstance(x, list) else [x]
-            y_list = y if isinstance(y, list) else [y]
-            xlim_list = xlim if isinstance(xlim, list) else [xlim]
-            ylim_list = ylim if isinstance(ylim, list) else [ylim]
-            title_list = title if isinstance(title, list) else [title]
-            xlabel_list = xlabel if isinstance(xlabel, list) else [xlabel]
-            ylabel_list = ylabel if isinstance(ylabel, list) else [ylabel]
-            
+
+            # Normaliza escalares y listas a listas paralelas.
+            x_list, y_list, xlim_list, ylim_list, title_list, xlabel_list, ylabel_list = [
+                p if isinstance(p, list) else [p]
+                for p in (x, y, xlim, ylim, title, xlabel, ylabel)
+            ]
             num_plots = len(x_list)
-            if not all(len(lst) == num_plots for lst in [y_list, xlim_list, ylim_list, title_list, xlabel_list, ylabel_list]):
-                raise ValueError(f"Todas las listas de parámetros de gráfico deben tener la misma longitud ({num_plots}).")
-            
+            if not all(len(lst) == num_plots for lst in (y_list, xlim_list, ylim_list, title_list, xlabel_list, ylabel_list)):
+                raise ValueError(
+                    f"Todas las listas de parámetros de gráfico deben tener la misma longitud ({num_plots})."
+                )
+
             for i, test in enumerate(self.tests):
                 for j in range(num_plots):
-                    current_x = x_list[j]
-                    current_y = y_list[j]
-                    current_xlim = xlim_list[j]
-                    current_ylim = ylim_list[j]
-                    current_title = title_list[j]
-                    current_xlabel = xlabel_list[j]
-                    current_ylabel = ylabel_list[j]
-                    is_final_page = (i == len(self.tests)-1) and (j == num_plots-1)
-                    
-                    # Check if the column names exist in the dataframe
-                    if current_x not in test.data_process.columns:
-                        print(f"Warning: Column '{current_x}' not found in data. Available columns: {test.data_process.columns.tolist()}")
+                    cx, cy = x_list[j], y_list[j]
+                    if cx not in test.data_process.columns or cy not in test.data_process.columns:
+                        logger.warning(
+                            "Columnas '%s'/'%s' no encontradas en data_process (disponibles: %s)",
+                            cx, cy, test.data_process.columns.tolist(),
+                        )
                         continue
-                    
-                    if current_y not in test.data_process.columns:
-                        print(f"Warning: Column '{current_y}' not found in data. Available columns: {test.data_process.columns.tolist()}")
-                        continue
-                    
+                    is_final_page = (i == len(self.tests) - 1) and (j == num_plots - 1)
                     fig_test, _ = test.plot_data(
-                        x=current_x,
-                        y=current_y,
-                        xlim=current_xlim,
-                        ylim=current_ylim,
-                        title=current_title,
-                        xlabel=current_xlabel,
-                        ylabel=current_ylabel,
+                        x=cx, y=cy,
+                        xlim=xlim_list[j], ylim=ylim_list[j],
+                        title=title_list[j],
+                        xlabel=xlabel_list[j], ylabel=ylabel_list[j],
                         legend=[f'{sample_name} {test.get_sample_id()}'],
                         report_id=f"{self.repor_id['infle']}{self.repor_id['subinfle']}",
                         test_name=test_name,
-                        num_pag=i*num_plots + j + num_1plot_pag,
-                        final_pag=is_final_page
-                        )
+                        num_pag=i * num_plots + j + num_1plot_pag,
+                        final_pag=is_final_page,
+                    )
                     pdf_file.savefig(fig_test)
                     plt.close(fig_test)
 
@@ -625,17 +685,7 @@ class Test_report:
         return self.report_file
 
 class Panel_toughness_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de tenacidad en paneles.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte de tenacidad por flexión en paneles (ASTM C1550 / EFNARC / EN 14488-5)."""
 
     _standards_map = {
         'ASTMC1550': [5., 10., 20., 30., 40., 45.],
@@ -650,9 +700,16 @@ class Panel_toughness_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panels_toughness_test(sample_id=id, data_file=str(Path(self.folder_path) / f"Losa P{id}.xlsx"))
-            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection', 'Displacement'])
-            # Para tenacidad según ASTM C1550/EFNARC/EN 14488-5, los puntos se definen en deflexión
+            test = Panels_toughness_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"Losa P{id}.xlsx"),
+            )
+            test.get_data(
+                data_file=test.data_file,
+                data_source='xlsx',
+                variable_names=['Time', 'Load', 'Deflection', 'Displacement'],
+            )
+            # ASTM C1550 / EFNARC / EN 14488-5: puntos característicos sobre deflexión.
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
@@ -692,17 +749,7 @@ class Panel_toughness_test_report(Test_report):
         }
 
 class Panel_Beam_residual_strength_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de resistencia residual en vigas y paneles con CMOD.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte de resistencia residual con CMOD para vigas/paneles (EN 14651 / EN 14488)."""
 
     _standards_map = {
         'EN14651': [0.5, 1.5, 2.5, 3.5, 4.],
@@ -715,18 +762,12 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Panel_Beam_residual_strength_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"))
-            test.data = import_data_text(
-                file_path=str(test.data_file),
-                delimiter='auto',
-                variable_names=['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'],
-                debug_sample=False,
-                auto_detect_header=True,
-                min_valid_cols=3,
-                warn_once=True,
-                audit_log_dir=str(Path(self.folder_path) / "audits")
+            test = Panel_Beam_residual_strength_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"),
             )
-            # Para resistencia residual según EN 14651/EN 14488, los puntos se definen en CMOD
+            self._load_specimen_dat(test, ['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'])
+            # EN 14651 / EN 14488: puntos característicos definidos sobre CMOD.
             test.preprocess_data(defl_points=self.defl_points, x_col='CMOD', include_extra_cols=['Deflection'])
             self.tests.append(test)
 
@@ -768,17 +809,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         }
 
 class Beam_residual_strength_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de resistencia residual en vigas.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte de resistencia residual de vigas por deflexión (ASTM C1609)."""
 
     _standards_map = {
         'ASTMC1609': [0.75, 3.],
@@ -790,18 +821,12 @@ class Beam_residual_strength_test_report(Test_report):
         self.set_defl_points()
 
         for id in self.samples_id:
-            test = Beam_residual_strength_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"))
-            test.data = import_data_text(
-                file_path=str(test.data_file),
-                delimiter='auto',
-                variable_names=['Time', 'Displacement', 'Load', 'Deflection', 'Deflection2'],
-                debug_sample=False,
-                auto_detect_header=True,
-                min_valid_cols=3,
-                warn_once=True,
-                audit_log_dir=str(Path(self.folder_path) / "audits")
+            test = Beam_residual_strength_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"),
             )
-            # Para resistencia residual según ASTM C1609, los puntos se definen en deflexión
+            self._load_specimen_dat(test, ['Time', 'Displacement', 'Load', 'Deflection', 'Deflection2'])
+            # ASTM C1609: puntos característicos definidos sobre deflexión.
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
 
@@ -842,33 +867,45 @@ class Beam_residual_strength_test_report(Test_report):
         }
 
 class Axial_compression_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de compresión axial.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte de compresión axial de testigos (cores) de hormigón."""
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 5
+    # Layout 'Cores': por muestra, fila i+16. Columna F=6 (diámetro mm),
+    # N=14 (resistencia MPa), O=15 (resistencia kgf/cm²), W=23 (carga máx kN).
+    # 1 MPa = 10.1972 kgf/cm².
+    _MPA_TO_KGFCM2 = 10.1972
 
     def add_tests(self):
-        for id in self.samples_id:
-            #test = Axial_compression_test(sample_id=id, data_file=f"{self.folder_path}{self.repor_id['infle']}-d{id}/specimen.dat")
-            #test.get_data(data_file=test.data_file, data_source='csv', variable_names=['Time', 'Displacement', 'Load'])
-            test = Axial_compression_test(sample_id=id, data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"))
-            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Displacement', 'Load'])
+        for i, id in enumerate(self.samples_id):
+            diameter = get_data_excel(
+                file_path=self.excel_file,
+                sheet_idx='Cores',
+                position=(i + 16, 6),
+            )
+            if diameter is None or float(diameter) <= 0:
+                raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
+            test = Axial_compression_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"),
+            )
+            test.get_data(
+                data_file=test.data_file,
+                data_source='xlsx',
+                variable_names=['Time', 'Displacement', 'Load'],
+            )
+            test.get_area_section(length_sec=float(diameter), section_type='circular')
+            test.get_strength()
             test.preprocess_data()
             self.tests.append(test)
-    
+
     def _cell_writes(self, i, test):
-        yield 'Cores', (i + 16, 23), test.get_max_load()
-    
+        SHEET = 'Cores'
+        row = i + 16
+        yield SHEET, (row, 14), test.strength
+        yield SHEET, (row, 15), test.strength * self._MPA_TO_KGFCM2
+        yield SHEET, (row, 23), test.get_max_load()
+
     def plot_spec(self) -> dict:
         return {
             'x': 'Displacement',
@@ -883,32 +920,75 @@ class Axial_compression_test_report(Test_report):
             'comparative': False,
         }
 
-class Tapa_buzon_flexion_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de flexion en tapas de buzon.
+class Axial_compression_local_test_report(Axial_compression_test_report):
+    """Compresión axial con strain gauges (curva esfuerzo-deformación adicional).
 
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
+    Diferencias respecto a ``Axial_compression_test_report``:
+        - El archivo de datos por probeta tiene columnas
+          ``[Time, Load, Displacement, SG1, SG2, SG3]`` (SG en µε).
+        - Se agrega un segundo gráfico Esfuerzo-Deformación al informe.
+
+    Hereda de la clase base la lectura del diámetro (``'Cores'!F{i+16}``) y la
+    escritura de resistencia/maxLoad en columnas N/O/W.
     """
+
+    def add_tests(self):
+        for i, id in enumerate(self.samples_id):
+            diameter = get_data_excel(
+                file_path=self.excel_file,
+                sheet_idx='Cores',
+                position=(i + 16, 6),
+            )
+            if diameter is None or float(diameter) <= 0:
+                raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
+            test = Axial_compression_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"),
+            )
+            test.get_data(
+                data_file=test.data_file,
+                data_source='xlsx',
+                variable_names=['Time', 'Load', 'Displacement', 'SG1', 'SG2', 'SG3'],
+            )
+            test.get_area_section(length_sec=float(diameter), section_type='circular')
+            test.get_strength()
+            test.get_strain()
+            test.preprocess_data()
+            self.tests.append(test)
+
+    def plot_spec(self) -> dict:
+        return {
+            'x': ['Displacement', 'Strain'],
+            'y': ['Load', 'Stress'],
+            'xlim': [(0, None), (0, None)],
+            'ylim': [(0, None), (0, None)],
+            'title': ['Fuerza-Desplazamiento', 'Esfuerzo-Deformación'],
+            'xlabel': ['Desplazamiento (mm)', 'Deformación unitaria (mm/mm)'],
+            'ylabel': ['Fuerza (kN)', 'Esfuerzo (MPa)'],
+            'sample_name': 'CORE',
+            'test_name': 'ENSAYO DE RESISTENCIA A LA COMPRESIÓN',
+            'comparative': False,
+        }
+
+class Tapa_buzon_flexion_test_report(Test_report):
+    """Reporte de ensayo de flexión (tránsito) de tapas de buzón (NTP 339.111)."""
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 4
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Tapa_buzon_flexion_test(sample_id=id, data_file=str(Path(self.folder_path) / f"tapas_{id}.xlsx"))
+            test = Tapa_buzon_flexion_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"tapas_{id}.xlsx"),
+            )
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load'])
             test.preprocess_data()
             self.tests.append(test)
-    
+
     def _cell_writes(self, i, test):
         yield 'Tapa C°A°', (3 * i + 26, 17), test.get_max_load()
-    
+
     def plot_spec(self) -> dict:
         return {
             'x': 'Time',
@@ -924,24 +1004,17 @@ class Tapa_buzon_flexion_test_report(Test_report):
         }
 
 class Beam_flexion_test_report(Test_report):
-    """
-    Clase para generar informes de pruebas de flexion en vigas.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte de ensayo de flexión en vigas."""
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 4
 
     def add_tests(self):
         for id in self.samples_id:
-            test = Flexion_test(sample_id=id, data_file=str(Path(self.folder_path) / f"vigas_{id}.xlsx"))
+            test = Flexion_test(
+                sample_id=id,
+                data_file=str(Path(self.folder_path) / f"vigas_{id}.xlsx"),
+            )
             test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection'])
             test.preprocess_data()
             self.tests.append(test)
@@ -964,17 +1037,7 @@ class Beam_flexion_test_report(Test_report):
         }
 
 class Generate_test_report(Test_report):
-    """
-    Clase genérica para generar informes de pruebas a partir de un Excel existente.
-
-    Atributos:
-        infle (str): Identificador de la prueba.
-        subinfle (str): Subidentificador de la prueba.
-        folder (str): Carpeta base donde se generan los archivos.
-        standard (str): Norma aplicada en la prueba.
-        client_id (str): Nombre de la empresa que realiza la prueba.
-        samples_id (list): Identificadores de las muestras.
-    """
+    """Reporte genérico: convierte un Excel ya preparado por el usuario a PDF."""
 
     report_extension = 'xlsx'
 

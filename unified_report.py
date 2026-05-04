@@ -2,6 +2,7 @@
 
 Este script puede generar reportes para múltiples tipos de ensayos mecánicos:
 - cores: Ensayos de compresión axial (testigos de hormigón)
+- cores_local: Compresión axial instrumentada con 3 strain gauges (curva esfuerzo-deformación)
 - panels: Ensayos de tenacidad de paneles
 - panels_residual: Ensayos de resistencia residual con CMOD (paneles/vigas, EN 14651 / EN 14488)
 - beams_residual: Ensayos de resistencia residual de vigas por deflexión (ASTM C1609)
@@ -11,6 +12,9 @@ Este script puede generar reportes para múltiples tipos de ensayos mecánicos:
 Ejemplos de uso:
     # Reporte de testigos de hormigón
     python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
+
+    # Reporte de testigos con strain gauges (esfuerzo-deformación)
+    python unified_report.py cores_local --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 3
 
     # Reporte de tenacidad de paneles
     python unified_report.py panels --infle 111-25 --subinfle C --standard EFNARC1996 --empresa PRODIMIN --n 3
@@ -38,6 +42,7 @@ from typing import Dict, List, Optional, Type, Union
 
 from test_ledi import (
     Axial_compression_test_report,
+    Axial_compression_local_test_report,
     Panel_toughness_test_report,
     Panel_Beam_residual_strength_test_report,
     Beam_residual_strength_test_report,
@@ -58,6 +63,16 @@ REPORT_CONFIGS = {
         'default_client': 'PRODIMIN',
         'default_base': 'D:/',
         'default_n': 6,
+        'requires_samples': True,
+    },
+    'cores_local': {
+        'report_class': Axial_compression_local_test_report,
+        'description': 'Genera reporte de compresión axial con strain gauges (curva esfuerzo-deformación)',
+        'default_standard': 'CORES',
+        'standard_choices': None,
+        'default_client': 'PRODIMIN',
+        'default_base': 'D:/',
+        'default_n': 3,
         'requires_samples': True,
     },
     'panels': {
