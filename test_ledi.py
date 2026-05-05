@@ -877,6 +877,7 @@ class Axial_compression_test_report(Test_report):
     _MPA_TO_KGFCM2 = 10.1972
 
     def add_tests(self):
+        variable_names = ['Time', 'Displacement', 'Load']
         for i, id in enumerate(self.samples_id):
             diameter = get_data_excel(
                 file_path=self.excel_file,
@@ -885,15 +886,25 @@ class Axial_compression_test_report(Test_report):
             )
             if diameter is None or float(diameter) <= 0:
                 raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
-            test = Axial_compression_test(
-                sample_id=id,
-                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"),
-            )
-            test.get_data(
-                data_file=test.data_file,
-                data_source='xlsx',
-                variable_names=['Time', 'Displacement', 'Load'],
-            )
+            dat_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}" / "specimen.dat"
+            xlsx_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"
+            if dat_path.exists():
+                logger.info(f"Muestra {id}: usando specimen.dat ({dat_path})")
+                test = Axial_compression_test(sample_id=id, data_file=str(dat_path))
+                self._load_specimen_dat(test, variable_names)
+            elif xlsx_path.exists():
+                logger.info(f"Muestra {id}: usando xlsx alternativo ({xlsx_path})")
+                test = Axial_compression_test(sample_id=id, data_file=str(xlsx_path))
+                test.get_data(
+                    data_file=test.data_file,
+                    data_source='xlsx',
+                    variable_names=variable_names,
+                )
+            else:
+                raise FileNotFoundError(
+                    f"No se encontró archivo de datos para muestra {id}: "
+                    f"ni {dat_path} ni {xlsx_path}"
+                )
             test.get_area_section(length_sec=float(diameter), section_type='circular')
             test.get_strength()
             test.preprocess_data()
