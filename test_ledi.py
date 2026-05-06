@@ -1055,14 +1055,12 @@ class Generate_test_report(Test_report):
     def make_report_file(self):
         """Flujo especial: sólo conversión Excel→PDF + overlay (sin plots ni merge).
 
-        Usa ``pag_i=0, pag_f=0`` para exportar todo el libro. No llama a ``add_tests``
+        Exporta el libro completo (sin rango de páginas). No llama a ``add_tests``
         ni ``write_report``: el Excel ya viene preparado por el usuario.
         """
         convert_excel_to_pdf(
             excel_path=self.excel_file,
             pdf_path=self.report_file,
-            pag_i=0,
-            pag_f=0,
         )
         normalize_pdf_orientation(
             input_pdf_path=self.report_file,
