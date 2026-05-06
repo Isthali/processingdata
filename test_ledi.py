@@ -116,7 +116,7 @@ class Mechanical_test:
         ax.legend(fontsize=9)
         ax.grid(visible=True, which='both', linestyle='--')
         ax.minorticks_on()
-        ax.set_position([0.10, 0.15, 0.75, 0.75])
+        ax.set_position([0.10, 0.15, 0.70, 0.75])
         fig.text(0.05, 0.05, f"INF-LE {report_id}", fontsize=8, horizontalalignment='left')
         fig.text(0.5, 0.05, f"LEDI-{test_name}", fontsize=8, horizontalalignment='center')
         fig.text(0.85, 0.05, f"Pág. {num_pag}", fontsize=8, horizontalalignment='right')

@@ -118,7 +118,7 @@ REPORT_CONFIGS = {
     'generic': {
         'report_class': Generate_test_report,
         'description': 'Genera reporte genérico (sólo conversión Excel -> PDF)',
-        'default_standard': 'DM',
+        'default_standard': 'GENERIC',
         'standard_choices': None,
         'default_client': 'EMPRESA',
         'default_base': 'D:/',

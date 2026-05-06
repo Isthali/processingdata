@@ -55,7 +55,7 @@ de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
 | `panels_residual` | Resistencia residual con CMOD (EN 14651 / EN 14488) | `EN14488`            | `EN14651`, `EN14488`                            | 3             | `PRODIMIN`          |
 | `beams_residual`  | Resistencia residual de vigas (ASTM C1609)         | `ASTMC1609`          | `ASTMC1609`                                     | 3             | `PRODIMIN`          |
 | `tapas`           | Flexión de tapas de buzón (tránsito)               | `Tapa_Circular_CA`   | libre                                           | 3             | `PRODIMIN`          |
-| `generic`         | Conversión Excel → PDF sin procesamiento           | `DM`                 | libre                                           | 0             | `EMPRESA`           |
+| `generic`         | Conversión Excel → PDF sin procesamiento           | `GENERIC`                 | libre                                           | 0             | `EMPRESA`           |
 
 "Libre" significa que la CLI no restringe el valor; el reporte acepta
 cualquier string como identificador del estándar, pero no calculará puntos
