@@ -240,28 +240,41 @@ def parse_arguments() -> argparse.Namespace:
         if config['requires_samples']:
             # Grupo mutuamente exclusivo para especificar muestras
             sample_group = subparser.add_mutually_exclusive_group()
-            
+
             sample_group.add_argument(
                 '--n',
                 type=int,
                 default=config['default_n'],
                 help=f'Número de muestras consecutivas (por defecto: {config["default_n"]})'
             )
-            
+
             sample_group.add_argument(
                 '--ids',
                 type=int,
                 nargs='+',
                 help='IDs específicos de muestras (ej: --ids 3 4 7)'
             )
-            
+
             subparser.add_argument(
                 '--offset',
                 type=int,
                 default=1,
                 help='Valor inicial para IDs de muestras cuando se usa --n (por defecto: 1)'
             )
-        
+
+            default_num_1plot_pag = getattr(config['report_class'], 'num_1plot_pag', None)
+            subparser.add_argument(
+                '--num-1plot-pag',
+                dest='num_1plot_pag',
+                type=int,
+                default=None,
+                help=(
+                    'Número de página donde inician los gráficos en el informe '
+                    f'(por defecto: {default_num_1plot_pag}). Controla el rango '
+                    'de páginas exportadas desde Excel: pag_f = num_1plot_pag - 1.'
+                )
+            )
+
         subparser.add_argument(
             '--verbose',
             '-v',
@@ -326,16 +339,20 @@ def generate_report(args: argparse.Namespace) -> None:
         logging.info("Generando reporte genérico (sin muestras específicas)")
     
     # Ejecutar generación del reporte
+    report_kwargs = dict(
+        infle=args.infle,
+        subinfle=args.subinfle,
+        folder=folder,
+        standard=args.standard,
+        client_id=args.empresa,
+        samples_id=samples_id,
+    )
+    num_1plot_pag = getattr(args, 'num_1plot_pag', None)
+    if num_1plot_pag is not None:
+        report_kwargs['num_1plot_pag'] = num_1plot_pag
+
     try:
-        run_report(
-            report_class,
-            infle=args.infle,
-            subinfle=args.subinfle,
-            folder=folder,
-            standard=args.standard,
-            client_id=args.empresa,
-            samples_id=samples_id,
-        )
+        run_report(report_class, **report_kwargs)
         logging.info(f"Reporte generado exitosamente en: {folder}")
         
     except Exception as e:

@@ -437,7 +437,8 @@ class Test_report:
             Si está vacío, ``set_defl_points`` levanta un error.
         header_footer_pdf: Ruta al PDF de encabezado/pie (acreditado o no).
         num_1plot_pag: Número de página del primer plot (controla el rango de
-            páginas exportadas desde Excel: ``pag_f = num_1plot_pag - 1``).
+            páginas exportadas desde Excel: ``pag_f = num_1plot_pag - 1``). Se
+            puede sobreescribir por instancia pasándolo al constructor.
     """
 
     report_extension: str = 'xlsm'
@@ -453,6 +454,7 @@ class Test_report:
         standard=None,
         client_id=None,
         samples_id=None,
+        num_1plot_pag: int | None = None,
     ):
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
@@ -464,6 +466,8 @@ class Test_report:
         self.plots_file = 'plots_file'
         self.report_file = 'report_file'
         self.defl_points = np.array([])
+        if num_1plot_pag is not None:
+            self.num_1plot_pag = num_1plot_pag
         # Resuelve nombres de archivo (excel_file, plots_file, report_file) en base
         # a los identificadores ya asignados.
         self.set_report_files(extension=self.report_extension)

@@ -87,6 +87,7 @@ Las opciones `--n` y `--ids` son **mutuamente exclusivas**:
 | `--n N`    | Número de muestras consecutivas desde `--offset` (default del subcomando si se omite). |
 | `--offset` | Valor inicial de ID cuando se usa `--n`. Por defecto 1.                  |
 | `--ids`    | Lista explícita de IDs (ej. `--ids 3 4 7`). Anula `--n`/`--offset`.      |
+| `--num-1plot-pag` | Número de página donde inician los gráficos. Controla el rango exportado desde Excel (`pag_f = num_1plot_pag − 1`). Default por subcomando: `panels`/`beams_residual`/`tapas` = 4, `cores`/`cores_local`/`panels_residual` = 5. |
 
 ## Ejemplos
 
@@ -121,6 +122,10 @@ python unified_report.py panels --infle 111-25 --subinfle C
 # Con norma e IDs no consecutivos
 python unified_report.py panels --infle 111-25 --subinfle C \
     --standard EFNARC1999 --ids 2 4 5
+
+# Cambiando la página de inicio de los gráficos (default = 4)
+python unified_report.py panels --infle 111-25 --subinfle C \
+    --n 3 --num-1plot-pag 6
 ```
 
 ### Resistencia residual con CMOD
