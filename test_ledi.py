@@ -260,6 +260,7 @@ class Axial_compression_test(Resistance_mechanical_test):
         self.data_file = data_file
         self.area_sec: float = 0.0
         self.strength: float = 0.0
+        self.correction_factor: float = 1.0
 
     def get_area_section(self, length_sec: Union[float, List[float]], section_type: str) -> float:
         """Calcula el área de la sección transversal según el tipo de geometría.
@@ -280,18 +281,29 @@ class Axial_compression_test(Resistance_mechanical_test):
             raise ValueError(f"Tipo de sección no reconocido: {section_type}. Use 'circular', 'square', o 'rectangular'.")
         return self.area_sec
     
-    def get_strength(self) -> float:
+    def get_strength(self, correction_factor: float = 1.0) -> float:
         """Calcula la columna de esfuerzo (``Stress``, MPa) y la resistencia máxima.
 
         Asume ``Load`` en kN y ``area_sec`` en mm² (diámetro/lado en mm), por lo
-        que ``Stress = 1000 * |Load| / area_sec`` queda en MPa. ``self.strength``
-        es el máximo de esa columna.
+        que ``Stress = 1000 * |Load| / area_sec`` queda en MPa. El factor de
+        corrección por esbeltez se aplica a toda la columna ``Stress`` y, por
+        tanto, ``self.strength`` (su máximo) queda también corregido.
+
+        Args:
+            correction_factor: Factor de corrección por esbeltez (columna ``K``
+                del reporte). Multiplica toda la curva de esfuerzo
+                (``Stress corregido = K * Stress medido``), de modo que tanto la
+                resistencia reportada como el gráfico Esfuerzo-Deformación quedan
+                corregidos.
         """
         if self.area_sec <= 0:
             raise ValueError("Área de sección debe ser calculada primero y mayor que 0.")
         if self.data.empty or 'Load' not in self.data.columns:
             raise ValueError("Cargue datos con columna 'Load' antes de calcular la resistencia.")
-        self.data['Stress'] = 1000.0 * self.data['Load'].abs() / self.area_sec
+        if correction_factor <= 0:
+            raise ValueError(f"Factor de corrección por esbeltez debe ser mayor que 0: {correction_factor!r}")
+        self.correction_factor = float(correction_factor)
+        self.data['Stress'] = self.correction_factor * 1000.0 * self.data['Load'].abs() / self.area_sec
         self.strength = float(self.data['Stress'].max())
         return self.strength
 
@@ -876,7 +888,8 @@ class Axial_compression_test_report(Test_report):
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 5
     # Layout 'Cores': por muestra, fila i+16. Columna F=6 (diámetro mm),
-    # N=14 (resistencia MPa), O=15 (resistencia kgf/cm²), W=23 (carga máx kN).
+    # K=11 (factor de corrección por esbeltez), N=14 (resistencia MPa),
+    # O=15 (resistencia kgf/cm²), W=23 (carga máx kN).
     # 1 MPa = 10.1972 kgf/cm².
     _MPA_TO_KGFCM2 = 10.1972
 
@@ -890,6 +903,13 @@ class Axial_compression_test_report(Test_report):
             )
             if diameter is None or float(diameter) <= 0:
                 raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
+            k_factor = get_data_excel(
+                file_path=self.excel_file,
+                sheet_idx='Cores',
+                position=(i + 16, 11),
+            )
+            if k_factor is None or float(k_factor) <= 0:
+                raise ValueError(f"Factor de corrección por esbeltez inválido en 'Cores'!K{i + 16}: {k_factor!r}")
             dat_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}" / "specimen.dat"
             xlsx_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"
             if dat_path.exists():
@@ -910,7 +930,7 @@ class Axial_compression_test_report(Test_report):
                     f"ni {dat_path} ni {xlsx_path}"
                 )
             test.get_area_section(length_sec=float(diameter), section_type='circular')
-            test.get_strength()
+            test.get_strength(correction_factor=float(k_factor))
             test.preprocess_data()
             self.tests.append(test)
 
@@ -956,6 +976,13 @@ class Axial_compression_local_test_report(Axial_compression_test_report):
             )
             if diameter is None or float(diameter) <= 0:
                 raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
+            k_factor = get_data_excel(
+                file_path=self.excel_file,
+                sheet_idx='Cores',
+                position=(i + 16, 11),
+            )
+            if k_factor is None or float(k_factor) <= 0:
+                raise ValueError(f"Factor de corrección por esbeltez inválido en 'Cores'!K{i + 16}: {k_factor!r}")
             test = Axial_compression_test(
                 sample_id=id,
                 data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"),
@@ -966,7 +993,7 @@ class Axial_compression_local_test_report(Axial_compression_test_report):
                 variable_names=['Time', 'Load', 'Displacement', 'SG1', 'SG2', 'SG3'],
             )
             test.get_area_section(length_sec=float(diameter), section_type='circular')
-            test.get_strength()
+            test.get_strength(correction_factor=float(k_factor))
             test.get_strain()
             test.preprocess_data()
             self.tests.append(test)
