@@ -23,8 +23,11 @@ debe contener:
    ```
    (los genéricos usan `.xlsx`; el sufijo `_{n}` sólo aparece si hay muestras).
 
-2. **Archivos de datos crudos por muestra**, con la convención de nombre y las
-   columnas que espera cada tipo:
+2. **Archivos de datos crudos por muestra**. Cada tipo tiene una convención de
+   nombre y un orden de columnas **por defecto** (tabla abajo); ambos se pueden
+   cambiar con `--file-pattern` y `--columns`, o de forma permanente con un
+   [`report_config.json`](#archivo-de-configuración-por-informe) en la carpeta
+   del informe:
 
    | Subcomando        | Archivo por muestra                         | Columnas                                 |
    |-------------------|---------------------------------------------|------------------------------------------|
@@ -40,7 +43,8 @@ debe contener:
    propio template** en la celda `'Cores'!F{i+16}` (1ª muestra → F16, 2ª → F17,
    etc.). Si la celda está vacía o ≤ 0, el script aborta. La resistencia se
    escribe en columna **N (MPa)** y **O (kgf/cm²)** de la misma fila; la carga
-   máxima en la columna **W (kN)**.
+   máxima en la columna **W (kN)**. La fila de la primera muestra (16 por
+   defecto) se puede cambiar con `--start-row`.
 
 Si la plantilla o los archivos de datos no existen, el error aparece al momento
 de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
@@ -88,6 +92,34 @@ Las opciones `--n` y `--ids` son **mutuamente exclusivas**:
 | `--offset` | Valor inicial de ID cuando se usa `--n`. Por defecto 1.                  |
 | `--ids`    | Lista explícita de IDs (ej. `--ids 3 4 7`). Anula `--n`/`--offset`.      |
 | `--num-1plot-pag` | Número de página donde inician los gráficos. Controla el rango exportado desde Excel (`pag_f = num_1plot_pag − 1`). Default por subcomando: `panels`/`beams_residual`/`tapas` = 4, `cores`/`cores_local`/`panels_residual` = 5. |
+| `--start-row` | Fila de la plantilla Excel correspondiente a la **primera muestra**, para lectura y escritura. Default por subcomando: `cores`/`cores_local` = 16, `panels` = 18, `panels_residual`/`beams_residual` = 19, `tapas` = 26. Las muestras siguientes ocupan filas según el layout del ensayo: fila consecutiva (`cores`, `panels_residual`, `beams_residual`), bloques de 5 filas (`panels`) o de 3 filas (`tapas`). |
+| `--file-pattern` | Patrón del nombre del archivo de datos por muestra, relativo a `{base-dir}/{infle}/`. Marcadores: `{id}` (obligatorio), `{infle}`, `{subinfle}`. La extensión decide el lector: `.xlsx`/`.xlsm`/`.xls` se leen como Excel, cualquier otra (`.dat`, `.txt`, `.csv`) como texto delimitado. Ej.: `--file-pattern "Panel M{id}.xlsx"` o `--file-pattern "losa M{id}.xlsx"`. Defaults: ver tabla de archivos arriba (`cores` prueba `{infle}-d{id}/specimen.dat` y luego `{infle}-d{id}.xlsx`). |
+| `--columns` | Nombres de las columnas del archivo de datos **en el orden en que aparecen en el archivo** (se asignan posicionalmente). Ej.: `--columns Time Deflection Load Displacement`. Cada ensayo exige ciertas columnas (`Load` siempre; `Deflection`, `CMOD`, `Displacement` o `Time` según el tipo); si falta una, el error lo indica al iniciar. |
+| `--config` | Ruta a un JSON de configuración del informe. Si se omite, se busca `report_config.json` en `{base-dir}/{infle}/` automáticamente. Ver sección siguiente. |
+
+## Archivo de configuración por informe
+
+Para no repetir flags en cada corrida, coloca un `report_config.json` dentro de
+la carpeta del informe (`{base-dir}/{infle}/`). El script lo carga
+automáticamente (o usa `--config <ruta>` para apuntar a otro archivo). Es la
+opción recomendada cuando un informe usa nombres de archivo, orden de columnas
+o filas de plantilla distintos de los defaults: se configura **una sola vez por
+informe** y todas las corridas lo heredan.
+
+```json
+{
+  "file_pattern": "Panel M{id}.xlsx",
+  "columns": ["Time", "Deflection", "Load", "Displacement"],
+  "start_row": 22,
+  "num_1plot_pag": 5
+}
+```
+
+Todas las claves son opcionales (`start_row`, `num_1plot_pag`, `file_pattern`,
+`columns`); las no reconocidas se ignoran con una advertencia.
+
+**Precedencia**: flag del CLI > `report_config.json` > default del subcomando.
+Es decir, un flag explícito siempre gana sobre el archivo.
 
 ## Ejemplos
 
@@ -100,6 +132,10 @@ python unified_report.py cores --infle 336-24 --subinfle S
 # 8 muestras desde id=3 con carpeta custom
 python unified_report.py cores --infle 336-24 --subinfle S \
     --n 8 --offset 3 --base-dir D:/Reportes/Testigos
+
+# Plantilla con la primera muestra en la fila 20 (en vez de 16)
+python unified_report.py cores --infle 336-24 --subinfle S \
+    --n 6 --start-row 20
 ```
 
 ### Compresión axial con strain gauges (esfuerzo-deformación)
@@ -126,6 +162,12 @@ python unified_report.py panels --infle 111-25 --subinfle C \
 # Cambiando la página de inicio de los gráficos (default = 4)
 python unified_report.py panels --infle 111-25 --subinfle C \
     --n 3 --num-1plot-pag 6
+
+# Archivos llamados "Panel M1.xlsx", "Panel M2.xlsx", ... con las columnas
+# en orden Time, Deflection, Load, Displacement
+python unified_report.py panels --infle 111-25 --subinfle C --n 3 \
+    --file-pattern "Panel M{id}.xlsx" \
+    --columns Time Deflection Load Displacement
 ```
 
 ### Resistencia residual con CMOD
