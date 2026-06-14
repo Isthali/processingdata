@@ -451,12 +451,31 @@ class Test_report:
         num_1plot_pag: Número de página del primer plot (controla el rango de
             páginas exportadas desde Excel: ``pag_f = num_1plot_pag - 1``). Se
             puede sobreescribir por instancia pasándolo al constructor.
+        start_row: Fila de la plantilla Excel correspondiente a la primera
+            muestra, tanto para lectura (``add_tests``) como para escritura
+            (``_cell_writes``). Cada subclase declara su valor según el layout
+            de su plantilla; se puede sobreescribir por instancia pasándolo al
+            constructor.
+        data_file_pattern: Patrón del nombre del archivo de datos por muestra,
+            relativo a la carpeta del informe. Acepta los marcadores ``{id}``
+            (obligatorio), ``{infle}`` y ``{subinfle}``. Ejemplos:
+            ``'Losa P{id}.xlsx'``, ``'{infle}-Viga {id}/specimen.dat'``.
+            La extensión decide el cargador: ``.xlsx``/``.xlsm``/``.xls`` se
+            leen como Excel; cualquier otra como texto delimitado.
+        data_columns: Nombres asignados posicionalmente a las columnas del
+            archivo de datos (el archivo crudo no trae encabezados confiables).
+            Si el orden de columnas del equipo difiere del default, se
+            sobreescribe por instancia. Debe incluir ``_required_columns``.
     """
 
     report_extension: str = 'xlsm'
     _standards_map: dict = {}
     header_footer_pdf: str = './formatos/formato_no_acreditado.pdf'
     num_1plot_pag: int = 4
+    start_row: int = 16
+    data_file_pattern: Union[str, None] = None
+    data_columns: tuple = ()
+    _required_columns: frozenset = frozenset()
 
     def __init__(
         self,
@@ -467,6 +486,9 @@ class Test_report:
         client_id=None,
         samples_id=None,
         num_1plot_pag: int | None = None,
+        start_row: int | None = None,
+        data_file_pattern: str | None = None,
+        data_columns: Sequence[str] | None = None,
     ):
         self.repor_id = {'infle': infle, 'subinfle': subinfle}
         self.standard_test = standard
@@ -480,6 +502,25 @@ class Test_report:
         self.defl_points = np.array([])
         if num_1plot_pag is not None:
             self.num_1plot_pag = num_1plot_pag
+        if start_row is not None:
+            if int(start_row) < 1:
+                raise ValueError(f"start_row debe ser >= 1: {start_row!r}")
+            self.start_row = int(start_row)
+        if data_file_pattern is not None:
+            if '{id}' not in data_file_pattern:
+                raise ValueError(
+                    f"El patrón de archivo debe contener el marcador {{id}}: {data_file_pattern!r}"
+                )
+            self.data_file_pattern = data_file_pattern
+        if data_columns is not None:
+            self.data_columns = tuple(data_columns)
+        if self.data_columns:
+            missing = set(self._required_columns) - set(self.data_columns)
+            if missing:
+                raise ValueError(
+                    f"Faltan columnas requeridas por {type(self).__name__}: {sorted(missing)}. "
+                    f"Columnas recibidas: {list(self.data_columns)}"
+                )
         # Resuelve nombres de archivo (excel_file, plots_file, report_file) en base
         # a los identificadores ya asignados.
         self.set_report_files(extension=self.report_extension)
@@ -524,6 +565,38 @@ class Test_report:
 
     def add_tests(self):
         return self.tests
+
+    def _resolve_data_file(self, sample_id) -> Path:
+        """Resuelve la ruta del archivo de datos de una muestra desde ``data_file_pattern``."""
+        if not self.data_file_pattern:
+            raise ValueError(
+                f"{type(self).__name__} no define data_file_pattern; no se puede resolver el archivo de datos."
+            )
+        try:
+            rel = self.data_file_pattern.format(
+                id=sample_id,
+                infle=self.repor_id.get('infle', ''),
+                subinfle=self.repor_id.get('subinfle', ''),
+            )
+        except (KeyError, IndexError) as e:
+            raise ValueError(
+                f"Patrón de archivo inválido {self.data_file_pattern!r}: marcador no reconocido ({e}). "
+                "Use {id}, {infle} y/o {subinfle}."
+            )
+        return Path(self.folder_path) / rel
+
+    def _load_test_data(self, test) -> pd.DataFrame:
+        """Carga ``test.data`` eligiendo el cargador según la extensión del archivo.
+
+        ``.xlsx``/``.xlsm``/``.xls`` se leen como Excel; cualquier otra extensión
+        (``.dat``, ``.txt``, ``.csv``) como texto delimitado vía
+        ``_load_specimen_dat``. Usa ``self.data_columns`` como nombres de columnas.
+        """
+        cols = list(self.data_columns)
+        suffix = Path(test.data_file).suffix.lower()
+        if suffix in ('.xlsx', '.xlsm', '.xls'):
+            return test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=cols)
+        return self._load_specimen_dat(test, cols)
 
     def _load_specimen_dat(self, test, variable_names: Sequence[str]) -> pd.DataFrame:
         """Carga ``test.data`` desde ``specimen.dat`` (ensayos residuales)."""
@@ -710,6 +783,10 @@ class Panel_toughness_test_report(Test_report):
         'EN14488-5': [5., 10., 15., 20., 25., 30.],
     }
     num_1plot_pag = 4
+    start_row = 18
+    data_file_pattern = 'Losa P{id}.xlsx'
+    data_columns = ('Time', 'Load', 'Deflection', 'Displacement')
+    _required_columns = frozenset({'Load', 'Deflection'})
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -718,13 +795,9 @@ class Panel_toughness_test_report(Test_report):
         for id in self.samples_id:
             test = Panels_toughness_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"Losa P{id}.xlsx"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            test.get_data(
-                data_file=test.data_file,
-                data_source='xlsx',
-                variable_names=['Time', 'Load', 'Deflection', 'Displacement'],
-            )
+            self._load_test_data(test)
             # ASTM C1550 / EFNARC / EN 14488-5: puntos característicos sobre deflexión.
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
@@ -733,7 +806,7 @@ class Panel_toughness_test_report(Test_report):
         # Layout 'Resultados': bloque de 3 filas (load, deflection, toughness) por
         # muestra, una columna por punto de deflexión.
         SHEET = 'Resultados'
-        row_start = 5 * i + 18
+        row_start = 5 * i + self.start_row
         defl_cps = test.defl_cps
         for j, (deflection, load, toughness) in enumerate(
             zip(defl_cps['Deflection'], defl_cps['Load'], defl_cps['Toughness'])
@@ -772,6 +845,10 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         'EN14488': [0.5, 1.5, 2.5, 3.5, 4., 5.],
     }
     num_1plot_pag = 5
+    start_row = 19
+    data_file_pattern = '{infle}-Viga {id}/specimen.dat'
+    data_columns = ('Time', 'Displacement', 'Load', 'CMOD', 'Deflection')
+    _required_columns = frozenset({'Load', 'CMOD', 'Deflection'})
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -780,9 +857,9 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         for id in self.samples_id:
             test = Panel_Beam_residual_strength_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            self._load_specimen_dat(test, ['Time', 'Displacement', 'Load', 'CMOD', 'Deflection'])
+            self._load_test_data(test)
             # EN 14651 / EN 14488: puntos característicos definidos sobre CMOD.
             test.preprocess_data(defl_points=self.defl_points, x_col='CMOD', include_extra_cols=['Deflection'])
             self.tests.append(test)
@@ -792,7 +869,7 @@ class Panel_Beam_residual_strength_test_report(Test_report):
         # columnas (1000*load, deflection, cmod, toughness) por punto CMOD.
         # Nota: la carga se escala ×1000 (kN → N) para la plantilla.
         SHEET = 'ResistenciaResidual'
-        row = i + 19
+        row = i + self.start_row
         defl_cps = test.defl_cps
         for j, (load, deflection, cmod, toughness) in enumerate(
             zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['CMOD'], defl_cps['Toughness'])
@@ -831,6 +908,10 @@ class Beam_residual_strength_test_report(Test_report):
         'ASTMC1609': [0.75, 3.],
     }
     num_1plot_pag = 4
+    start_row = 19
+    data_file_pattern = '{infle}-Viga {id}/specimen.dat'
+    data_columns = ('Time', 'Displacement', 'Load', 'Deflection', 'Deflection2')
+    _required_columns = frozenset({'Load', 'Deflection'})
 
     def add_tests(self):
         """Agrega pruebas basadas en los identificadores de muestras."""
@@ -839,9 +920,9 @@ class Beam_residual_strength_test_report(Test_report):
         for id in self.samples_id:
             test = Beam_residual_strength_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-Viga {id}" / "specimen.dat"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            self._load_specimen_dat(test, ['Time', 'Displacement', 'Load', 'Deflection', 'Deflection2'])
+            self._load_test_data(test)
             # ASTM C1609: puntos característicos definidos sobre deflexión.
             test.preprocess_data(defl_points=self.defl_points, x_col='Deflection')
             self.tests.append(test)
@@ -851,7 +932,7 @@ class Beam_residual_strength_test_report(Test_report):
         # bloques de 3 columnas (1000*load, deflection, toughness) por punto.
         # Nota: la carga se escala ×1000 (kN → N) para la plantilla.
         SHEET = 'ResistenciaResidual'
-        row = i + 19
+        row = i + self.start_row
         defl_cps = test.defl_cps
         for j, (load, deflection, toughness) in enumerate(
             zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['Toughness'])
@@ -887,48 +968,61 @@ class Axial_compression_test_report(Test_report):
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 5
-    # Layout 'Cores': por muestra, fila i+16. Columna F=6 (diámetro mm),
-    # K=11 (factor de corrección por esbeltez), N=14 (resistencia MPa),
-    # O=15 (resistencia kgf/cm²), W=23 (carga máx kN).
+    start_row = 16
+    # data_file_pattern = None: por defecto intenta '{infle}-d{id}/specimen.dat'
+    # y cae a '{infle}-d{id}.xlsx'. Si se da un patrón explícito, se usa solo ese.
+    data_columns = ('Time', 'Displacement', 'Load')
+    _required_columns = frozenset({'Load', 'Displacement'})
+    # Layout 'Cores': por muestra, fila i+start_row (16 por defecto). Columna
+    # F=6 (diámetro mm), K=11 (factor de corrección por esbeltez),
+    # N=14 (resistencia MPa), O=15 (resistencia kgf/cm²), W=23 (carga máx kN).
     # 1 MPa = 10.1972 kgf/cm².
     _MPA_TO_KGFCM2 = 10.1972
 
+    def _read_template_geometry(self, i):
+        """Lee diámetro (F) y factor de esbeltez (K) de la fila ``i + start_row``."""
+        row = i + self.start_row
+        diameter = get_data_excel(
+            file_path=self.excel_file,
+            sheet_idx='Cores',
+            position=(row, 6),
+        )
+        if diameter is None or float(diameter) <= 0:
+            raise ValueError(f"Diámetro inválido en 'Cores'!F{row}: {diameter!r}")
+        k_factor = get_data_excel(
+            file_path=self.excel_file,
+            sheet_idx='Cores',
+            position=(row, 11),
+        )
+        if k_factor is None or float(k_factor) <= 0:
+            raise ValueError(f"Factor de corrección por esbeltez inválido en 'Cores'!K{row}: {k_factor!r}")
+        return float(diameter), float(k_factor)
+
     def add_tests(self):
-        variable_names = ['Time', 'Displacement', 'Load']
         for i, id in enumerate(self.samples_id):
-            diameter = get_data_excel(
-                file_path=self.excel_file,
-                sheet_idx='Cores',
-                position=(i + 16, 6),
-            )
-            if diameter is None or float(diameter) <= 0:
-                raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
-            k_factor = get_data_excel(
-                file_path=self.excel_file,
-                sheet_idx='Cores',
-                position=(i + 16, 11),
-            )
-            if k_factor is None or float(k_factor) <= 0:
-                raise ValueError(f"Factor de corrección por esbeltez inválido en 'Cores'!K{i + 16}: {k_factor!r}")
-            dat_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}" / "specimen.dat"
-            xlsx_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"
-            if dat_path.exists():
-                logger.info(f"Muestra {id}: usando specimen.dat ({dat_path})")
-                test = Axial_compression_test(sample_id=id, data_file=str(dat_path))
-                self._load_specimen_dat(test, variable_names)
-            elif xlsx_path.exists():
-                logger.info(f"Muestra {id}: usando xlsx alternativo ({xlsx_path})")
-                test = Axial_compression_test(sample_id=id, data_file=str(xlsx_path))
-                test.get_data(
-                    data_file=test.data_file,
-                    data_source='xlsx',
-                    variable_names=variable_names,
-                )
+            diameter, k_factor = self._read_template_geometry(i)
+            if self.data_file_pattern:
+                data_path = self._resolve_data_file(id)
+                if not data_path.exists():
+                    raise FileNotFoundError(f"No se encontró archivo de datos para muestra {id}: {data_path}")
+                logger.info(f"Muestra {id}: usando {data_path}")
+                test = Axial_compression_test(sample_id=id, data_file=str(data_path))
+                self._load_test_data(test)
             else:
-                raise FileNotFoundError(
-                    f"No se encontró archivo de datos para muestra {id}: "
-                    f"ni {dat_path} ni {xlsx_path}"
-                )
+                dat_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}" / "specimen.dat"
+                xlsx_path = Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"
+                if dat_path.exists():
+                    logger.info(f"Muestra {id}: usando specimen.dat ({dat_path})")
+                    test = Axial_compression_test(sample_id=id, data_file=str(dat_path))
+                elif xlsx_path.exists():
+                    logger.info(f"Muestra {id}: usando xlsx alternativo ({xlsx_path})")
+                    test = Axial_compression_test(sample_id=id, data_file=str(xlsx_path))
+                else:
+                    raise FileNotFoundError(
+                        f"No se encontró archivo de datos para muestra {id}: "
+                        f"ni {dat_path} ni {xlsx_path}"
+                    )
+                self._load_test_data(test)
             test.get_area_section(length_sec=float(diameter), section_type='circular')
             test.get_strength(correction_factor=float(k_factor))
             test.preprocess_data()
@@ -936,7 +1030,7 @@ class Axial_compression_test_report(Test_report):
 
     def _cell_writes(self, i, test):
         SHEET = 'Cores'
-        row = i + 16
+        row = i + self.start_row
         yield SHEET, (row, 14), test.strength
         yield SHEET, (row, 15), test.strength * self._MPA_TO_KGFCM2
         yield SHEET, (row, 23), test.get_max_load()
@@ -963,35 +1057,22 @@ class Axial_compression_local_test_report(Axial_compression_test_report):
           ``[Time, Load, Displacement, SG1, SG2, SG3]`` (SG en µε).
         - Se agrega un segundo gráfico Esfuerzo-Deformación al informe.
 
-    Hereda de la clase base la lectura del diámetro (``'Cores'!F{i+16}``) y la
-    escritura de resistencia/maxLoad en columnas N/O/W.
+    Hereda de la clase base la lectura del diámetro (``'Cores'!F{i+start_row}``)
+    y la escritura de resistencia/maxLoad en columnas N/O/W.
     """
+
+    data_file_pattern = '{infle}-d{id}.xlsx'
+    data_columns = ('Time', 'Load', 'Displacement', 'SG1', 'SG2', 'SG3')
+    _required_columns = frozenset({'Load', 'Displacement'})
 
     def add_tests(self):
         for i, id in enumerate(self.samples_id):
-            diameter = get_data_excel(
-                file_path=self.excel_file,
-                sheet_idx='Cores',
-                position=(i + 16, 6),
-            )
-            if diameter is None or float(diameter) <= 0:
-                raise ValueError(f"Diámetro inválido en 'Cores'!F{i + 16}: {diameter!r}")
-            k_factor = get_data_excel(
-                file_path=self.excel_file,
-                sheet_idx='Cores',
-                position=(i + 16, 11),
-            )
-            if k_factor is None or float(k_factor) <= 0:
-                raise ValueError(f"Factor de corrección por esbeltez inválido en 'Cores'!K{i + 16}: {k_factor!r}")
+            diameter, k_factor = self._read_template_geometry(i)
             test = Axial_compression_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"{self.repor_id['infle']}-d{id}.xlsx"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            test.get_data(
-                data_file=test.data_file,
-                data_source='xlsx',
-                variable_names=['Time', 'Load', 'Displacement', 'SG1', 'SG2', 'SG3'],
-            )
+            self._load_test_data(test)
             test.get_area_section(length_sec=float(diameter), section_type='circular')
             test.get_strength(correction_factor=float(k_factor))
             test.get_strain()
@@ -1017,19 +1098,24 @@ class Tapa_buzon_flexion_test_report(Test_report):
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 4
+    start_row = 26
+    data_file_pattern = 'tapas_{id}.xlsx'
+    data_columns = ('Time', 'Load')
+    _required_columns = frozenset({'Time', 'Load'})
 
     def add_tests(self):
         for id in self.samples_id:
             test = Tapa_buzon_flexion_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"tapas_{id}.xlsx"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load'])
+            self._load_test_data(test)
             test.preprocess_data()
             self.tests.append(test)
 
     def _cell_writes(self, i, test):
-        yield 'Tapa C°A°', (3 * i + 26, 17), test.get_max_load()
+        # Layout 'Tapa C°A°': bloque de 3 filas por muestra desde start_row.
+        yield 'Tapa C°A°', (3 * i + self.start_row, 17), test.get_max_load()
 
     def plot_spec(self) -> dict:
         return {
@@ -1050,19 +1136,23 @@ class Beam_flexion_test_report(Test_report):
 
     header_footer_pdf = './formatos/formato_acreditado.pdf'
     num_1plot_pag = 4
+    start_row = 16
+    data_file_pattern = 'vigas_{id}.xlsx'
+    data_columns = ('Time', 'Load', 'Deflection')
+    _required_columns = frozenset({'Load', 'Deflection'})
 
     def add_tests(self):
         for id in self.samples_id:
             test = Flexion_test(
                 sample_id=id,
-                data_file=str(Path(self.folder_path) / f"vigas_{id}.xlsx"),
+                data_file=str(self._resolve_data_file(id)),
             )
-            test.get_data(data_file=test.data_file, data_source='xlsx', variable_names=['Time', 'Load', 'Deflection'])
+            self._load_test_data(test)
             test.preprocess_data()
             self.tests.append(test)
 
     def _cell_writes(self, i, test):
-        yield 'Vigas', (i + 16, 17), test.get_max_load()
+        yield 'Vigas', (i + self.start_row, 17), test.get_max_load()
 
     def plot_spec(self) -> dict:
         return {

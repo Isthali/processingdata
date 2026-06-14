@@ -35,6 +35,7 @@ Ejemplos de uso:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -126,6 +127,47 @@ REPORT_CONFIGS = {
         'requires_samples': False,
     },
 }
+
+
+# Archivo de configuración opcional por informe. Se busca dentro de la carpeta
+# {base-dir}/{infle}/ (o donde indique --config). Permite fijar una sola vez los
+# parámetros que describen la plantilla y los datos de ese informe, en lugar de
+# repetir flags en cada corrida. Precedencia: flag CLI > config > default de clase.
+CONFIG_FILENAME = 'report_config.json'
+CONFIG_KEYS = {'start_row', 'num_1plot_pag', 'file_pattern', 'columns'}
+
+
+def load_report_config(folder: str, config_path: Optional[str] = None) -> Dict:
+    """Carga el JSON de configuración del informe, si existe.
+
+    Args:
+        folder: Carpeta del informe ({base-dir}/{infle}/) donde se busca
+            ``CONFIG_FILENAME`` por defecto.
+        config_path: Ruta explícita (--config). Si se da y no existe, es error;
+            si no se da y el archivo por defecto no existe, devuelve {}.
+
+    Returns:
+        Dict sólo con las claves reconocidas (``CONFIG_KEYS``).
+    """
+    path = Path(config_path) if config_path else Path(folder) / CONFIG_FILENAME
+    if not path.exists():
+        if config_path:
+            raise FileNotFoundError(f"Archivo de configuración no encontrado: {path}")
+        return {}
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"El archivo de configuración debe ser un objeto JSON: {path}")
+    unknown = set(data) - CONFIG_KEYS
+    if unknown:
+        logging.warning(
+            f"Claves no reconocidas en {path}: {sorted(unknown)} (se ignoran). "
+            f"Válidas: {sorted(CONFIG_KEYS)}"
+        )
+    cfg = {k: v for k, v in data.items() if k in CONFIG_KEYS}
+    if cfg:
+        logging.info(f"Configuración cargada de {path}: {cfg}")
+    return cfg
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -275,6 +317,58 @@ def parse_arguments() -> argparse.Namespace:
                 )
             )
 
+            default_start_row = getattr(config['report_class'], 'start_row', None)
+            subparser.add_argument(
+                '--start-row',
+                dest='start_row',
+                type=int,
+                default=None,
+                help=(
+                    'Fila de la plantilla Excel correspondiente a la primera '
+                    f'muestra, para lectura y escritura (por defecto: {default_start_row}). '
+                    'Las muestras siguientes ocupan filas consecutivas o bloques '
+                    'según el layout del ensayo.'
+                )
+            )
+
+            default_pattern = getattr(config['report_class'], 'data_file_pattern', None)
+            subparser.add_argument(
+                '--file-pattern',
+                dest='file_pattern',
+                default=None,
+                help=(
+                    'Patrón del nombre del archivo de datos por muestra, relativo a '
+                    '{base-dir}/{infle}/. Marcadores: {id} (obligatorio), {infle}, {subinfle}. '
+                    'La extensión decide el lector: .xlsx/.xlsm/.xls como Excel, el resto '
+                    'como texto delimitado. Ej: "Panel M{id}.xlsx" '
+                    f'(por defecto: {default_pattern or "automático"}).'
+                )
+            )
+
+            default_columns = list(getattr(config['report_class'], 'data_columns', ()) or ())
+            subparser.add_argument(
+                '--columns',
+                dest='columns',
+                nargs='+',
+                default=None,
+                help=(
+                    'Nombres de las columnas del archivo de datos, en el orden en que '
+                    'aparecen en el archivo. Ej: --columns Time Deflection Load Displacement '
+                    f'(por defecto: {" ".join(default_columns) or "según el ensayo"}).'
+                )
+            )
+
+            subparser.add_argument(
+                '--config',
+                dest='config',
+                default=None,
+                help=(
+                    f'Ruta a un JSON de configuración del informe. Si se omite, se busca '
+                    f'{CONFIG_FILENAME} en {{base-dir}}/{{infle}}/. Claves: '
+                    f'{", ".join(sorted(CONFIG_KEYS))}. Los flags del CLI tienen prioridad.'
+                )
+            )
+
         subparser.add_argument(
             '--verbose',
             '-v',
@@ -315,6 +409,11 @@ def validate_arguments(args: argparse.Namespace) -> None:
         # Validar offset
         if hasattr(args, 'offset') and args.offset < 0:
             raise ValueError(f"El offset debe ser >= 0, recibido: {args.offset}")
+
+        # Validar fila inicial de la plantilla
+        start_row = getattr(args, 'start_row', None)
+        if start_row is not None and start_row < 1:
+            raise ValueError(f"La fila inicial (--start-row) debe ser >= 1, recibida: {start_row}")
     
     logging.info(f"Argumentos validados para tipo de ensayo: {args.test_type}")
 
@@ -347,9 +446,27 @@ def generate_report(args: argparse.Namespace) -> None:
         client_id=args.empresa,
         samples_id=samples_id,
     )
-    num_1plot_pag = getattr(args, 'num_1plot_pag', None)
+    # Parámetros de layout/datos: flag CLI > report_config.json > default de clase.
+    file_config = load_report_config(folder, getattr(args, 'config', None)) if config['requires_samples'] else {}
+
+    def resolve_param(name):
+        cli_value = getattr(args, name, None)
+        return cli_value if cli_value is not None else file_config.get(name)
+
+    num_1plot_pag = resolve_param('num_1plot_pag')
     if num_1plot_pag is not None:
-        report_kwargs['num_1plot_pag'] = num_1plot_pag
+        report_kwargs['num_1plot_pag'] = int(num_1plot_pag)
+    start_row = resolve_param('start_row')
+    if start_row is not None:
+        report_kwargs['start_row'] = int(start_row)
+    file_pattern = resolve_param('file_pattern')
+    if file_pattern is not None:
+        report_kwargs['data_file_pattern'] = str(file_pattern)
+    columns = resolve_param('columns')
+    if columns is not None:
+        if not isinstance(columns, (list, tuple)) or not all(isinstance(c, str) for c in columns):
+            raise ValueError(f"'columns' debe ser una lista de nombres de columna: {columns!r}")
+        report_kwargs['data_columns'] = list(columns)
 
     try:
         run_report(report_class, **report_kwargs)

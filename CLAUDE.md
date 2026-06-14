@@ -37,7 +37,7 @@ Four modules, layered bottom-up:
 
 - **`test_ledi.py`** — the domain core. Contains two parallel class hierarchies that must be read together:
   - **Test classes** (one instance per specimen): `Mechanical_test` → `Resistance_mechanical_test` / `Toughness_mechanical_test` → concrete tests (`Axial_compression_test`, `Panels_toughness_test`, `Panel_Beam_residual_strength_test`, `Beam_residual_strength_test`, `Tapa_buzon_flexion_test`). They load a single data file, compute max/min load, first peak, cumulative toughness, and interpolated characteristic points.
-  - **Report classes** (one per run): `Test_report` → `Panel_toughness_test_report`, `Panel_Beam_residual_strength_test_report`, `Beam_residual_strength_test_report`, `Axial_compression_test_report`, `Tapa_buzon_flexion_test_report`, `Generate_test_report`. Each orchestrates: `add_tests()` (build test instances from sample IDs, loading files with a naming convention specific to that test type), `preprocess_data()` per test, `write_report()` (push results into hardcoded cells of a specific sheet), plot generation via `make_plot_report`, and the final convert/merge/overlay pipeline in `make_report_file()`.
+  - **Report classes** (one per run): `Test_report` → `Panel_toughness_test_report`, `Panel_Beam_residual_strength_test_report`, `Beam_residual_strength_test_report`, `Axial_compression_test_report`, `Tapa_buzon_flexion_test_report`, `Generate_test_report`. Each orchestrates: `add_tests()` (build test instances from sample IDs, loading files with a naming convention specific to that test type), `preprocess_data()` per test, `write_report()` (push results into fixed columns of a specific sheet; the first-sample row is the `start_row` class attribute, overridable per run via the `--start-row` CLI flag), plot generation via `make_plot_report`, and the final convert/merge/overlay pipeline in `make_report_file()`.
 
 - **`unified_report.py` + `report_helpers.py`** — CLI layer. `REPORT_CONFIGS` in `unified_report.py` maps each subcommand name to its report class, default standard/client, and sample-count defaults. Adding a new test type = add a new report class in `test_ledi.py`, then add one entry to `REPORT_CONFIGS`.
 
@@ -46,7 +46,7 @@ Four modules, layered bottom-up:
 The report classes **do not generate the Excel template or the raw data files** — they expect them to already exist under `{base-dir}/{infle}/`:
 
 - A pre-configured template workbook named `INFLE_{infle}[-{subinfle}]_{standard}_{client}[_{n}].xlsm` (or `.xlsx` for `generic`) with the sheets and cells the report writes into (`Resultados`, `Cores`, etc. — see each report's `write_report`).
-- Per-sample raw data files with type-specific naming:
+- Per-sample raw data files with type-specific naming (defaults below; overridable via `--file-pattern`/`--columns` or a `report_config.json` in `{base-dir}/{infle}/` — class attributes `data_file_pattern`/`data_columns` on each report class, loader chosen by file extension):
   - `cores`: `{infle}-d{id}.xlsx` with columns Time/Displacement/Load
   - `panels`: `Losa P{id}.xlsx` with Time/Load/Deflection/Displacement
   - `panels_residual` / `beams_residual`: expect CMOD or Deflection columns depending on standard
