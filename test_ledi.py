@@ -61,6 +61,8 @@ class Mechanical_test:
             self.data = import_data_excel(file_path=str(self.data_file), sheet_idx=0, variable_names=variable_names)
         else:
             raise ValueError("data_source no reconocido (use 'csv' o 'xlsx').")
+        # Índice posicional 0..n-1: preprocess_data usa posiciones de argmin/argmax.
+        self.data = self.data.reset_index(drop=True)
         if self.data.empty:
             logger.warning("DataFrame vacío tras la importación de %s", self.data_file)
         return self.data
@@ -143,7 +145,8 @@ class Resistance_mechanical_test(Mechanical_test):
         loads = self.data['Load'].to_numpy()
         self.idx['i'] = int(np.argmin(np.abs(loads[:imaxP + 1] - 0.01 * self.maxLoad)))
         self.idx['f'] = int(np.argmin(np.abs(loads[imaxP:] - 0.75 * self.maxLoad))) + imaxP
-        self.data_process = self.data.loc[self.idx['i']:self.idx['f'], :]
+        # idx son posiciones (argmin/argmax), no etiquetas del índice.
+        self.data_process = self.data.iloc[self.idx['i']:self.idx['f'] + 1, :]
         return self.idx
 
 class Toughness_mechanical_test(Mechanical_test):
@@ -215,7 +218,7 @@ class Toughness_mechanical_test(Mechanical_test):
         # Filas en índices singulares (iL, maxLoad, f)
         idx = [self.idx['iL'], self.idx['maxLoad'], self.idx['f']]
         keep_cols = [x_col] + cols_to_interp
-        existing = self.data.loc[idx, [col for col in keep_cols if col in self.data.columns]].copy()
+        existing = self.data.iloc[idx][[col for col in keep_cols if col in self.data.columns]].copy()
         for c in keep_cols:
             if c not in existing.columns:
                 existing[c] = np.nan
@@ -247,7 +250,7 @@ class Toughness_mechanical_test(Mechanical_test):
         loads = self.data['Load'].to_numpy()
         self.idx['i'] = int(np.argmin(np.abs(loads[:imaxP + 1] - 0.01 * self.maxLoad)))
         self.idx['f'] = len(self.data) - 1
-        self.data_process = self.data.loc[self.idx['i']:, :]
+        self.data_process = self.data.iloc[self.idx['i']:, :]
         self.get_defl_cps(x_points=defl_points, x_col=x_col, include_extra_cols=include_extra_cols)
         return self.idx
 
