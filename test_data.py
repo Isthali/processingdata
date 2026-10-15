@@ -395,14 +395,29 @@ def import_data_excel(
             logger.debug(f"No se pudo auto-detectar header Excel: {e}")
 
     try:
+        # Se lee sin ``names``: si se pasan menos nombres que columnas, pandas
+        # convierte silenciosamente las primeras columnas en índice y desplaza
+        # los nombres (p. ej. 'Time' termina apuntando al desplazamiento).
         df = pd.read_excel(
             io=str(file_path),
             sheet_name=sheet_idx,
-            names=list(variable_names),
             dtype=dtype,
             skiprows=skiprows,
+            index_col=None,
             engine='openpyxl'
         )
+        # Columnas totalmente vacías (formato residual del Excel) no cuentan.
+        df = df.dropna(axis=1, how='all')
+        if df.shape[1] != len(variable_names):
+            raise ValueError(
+                f"El archivo {file_path.name} tiene {df.shape[1]} columnas de datos "
+                f"({[str(c).strip() for c in df.columns]}), pero se indicaron "
+                f"{len(variable_names)} nombres: {list(variable_names)}. "
+                "Indique un nombre por columna, en orden (p. ej. --columns Time Displacement Load "
+                "o 'columns' en report_config.json)."
+            )
+        df.columns = list(variable_names)
+        df = df.reset_index(drop=True)
         logger.info(f"Datos importados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas")
     except ValueError as e:
         if "Worksheet" in str(e):

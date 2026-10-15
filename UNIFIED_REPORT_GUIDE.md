@@ -94,7 +94,7 @@ Las opciones `--n` y `--ids` son **mutuamente exclusivas**:
 | `--num-1plot-pag` | Número de página donde inician los gráficos. Controla el rango exportado desde Excel (`pag_f = num_1plot_pag − 1`). Default por subcomando: `panels`/`beams_residual`/`tapas` = 4, `cores`/`cores_local`/`panels_residual` = 5. |
 | `--start-row` | Fila de la plantilla Excel correspondiente a la **primera muestra**, para lectura y escritura. Default por subcomando: `cores`/`cores_local` = 16, `panels` = 18, `panels_residual`/`beams_residual` = 19, `tapas` = 26. Las muestras siguientes ocupan filas según el layout del ensayo: fila consecutiva (`cores`, `panels_residual`, `beams_residual`), bloques de 5 filas (`panels`) o de 3 filas (`tapas`). |
 | `--file-pattern` | Patrón del nombre del archivo de datos por muestra, relativo a `{base-dir}/{infle}/`. Marcadores: `{id}` (obligatorio), `{infle}`, `{subinfle}`. La extensión decide el lector: `.xlsx`/`.xlsm`/`.xls` se leen como Excel, cualquier otra (`.dat`, `.txt`, `.csv`) como texto delimitado. Ej.: `--file-pattern "Panel M{id}.xlsx"` o `--file-pattern "losa M{id}.xlsx"`. Defaults: ver tabla de archivos arriba (`cores` prueba `{infle}-d{id}/specimen.dat` y luego `{infle}-d{id}.xlsx`). |
-| `--columns` | Nombres de las columnas del archivo de datos **en el orden en que aparecen en el archivo** (se asignan posicionalmente). Ej.: `--columns Time Deflection Load Displacement`. Cada ensayo exige ciertas columnas (`Load` siempre; `Deflection`, `CMOD`, `Displacement` o `Time` según el tipo); si falta una, el error lo indica al iniciar. |
+| `--columns` | Nombres de las columnas del archivo de datos **en el orden en que aparecen en el archivo** (se asignan posicionalmente). Ej.: `--columns Time Deflection Load Displacement`. Cada ensayo exige ciertas columnas (`Load` siempre; `Deflection`, `CMOD`, `Displacement` o `Time` según el tipo); si falta una, el error lo indica al iniciar. Para archivos Excel, la cantidad de nombres debe coincidir con la cantidad de columnas de datos del archivo; si no coincide, la lectura se detiene con un error (antes se desplazaban los nombres en silencio). |
 | `--config` | Ruta a un JSON de configuración del informe. Si se omite, se busca `report_config.json` en `{base-dir}/{infle}/` automáticamente. Ver sección siguiente. |
 
 ## Archivo de configuración por informe
@@ -187,6 +187,13 @@ python unified_report.py beams_residual --infle 222-25 --subinfle B --n 3
 
 ```bash
 python unified_report.py tapas --infle 245-25 --subinfle A --empresa FADECO --n 6
+```
+
+Si catman exporta también el Tempsonic (`Time | Tempsonic | Celda`), indique las 3 columnas:
+
+```bash
+python unified_report.py tapas --infle 267-26 --empresa COMPANY --n 6 \
+    --file-pattern "Tapa {id}.xlsx" --columns Time Displacement Load
 ```
 
 ### Conversión genérica
