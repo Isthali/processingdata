@@ -50,7 +50,7 @@ The report classes **do not generate the Excel template or the raw data files** 
   - `cores`: `{infle}-d{id}.xlsx` with columns Time/Displacement/Load
   - `panels`: `Losa P{id}.xlsx` with Time/Load/Deflection/Displacement
   - `panels_residual` / `beams_residual`: expect CMOD or Deflection columns depending on standard
-  - `tapas`: `tapas_{id}.xlsx` with Time/Load
+  - `tapas`: `tapas_{id}.xlsx` with Time/Displacement/Load
 
 If data files or template cells are missing, failures surface at `add_tests()` or `write_report()` — not at CLI parse time.
 

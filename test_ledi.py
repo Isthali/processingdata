@@ -1103,7 +1103,8 @@ class Tapa_buzon_flexion_test_report(Test_report):
     num_1plot_pag = 4
     start_row = 26
     data_file_pattern = 'tapas_{id}.xlsx'
-    data_columns = ('Time', 'Load')
+    # catman exporta Time | Tempsonic (mm) | Celda (kN).
+    data_columns = ('Time', 'Displacement', 'Load')
     _required_columns = frozenset({'Time', 'Load'})
 
     def add_tests(self):

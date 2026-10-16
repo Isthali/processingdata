@@ -36,7 +36,7 @@ debe contener:
    | `panels`          | `Losa P{id}.xlsx`                           | Time, Load, Deflection, Displacement     |
    | `panels_residual` | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, CMOD, Deflection |
    | `beams_residual`  | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, Deflection, Deflection2 |
-   | `tapas`           | `tapas_{id}.xlsx`                           | Time, Load                               |
+   | `tapas`           | `tapas_{id}.xlsx`                           | Time, Displacement, Load                 |
    | `generic`         | (sin datos crudos — sólo la plantilla)      | —                                        |
 
    Para `cores` y `cores_local` el **diámetro de cada probeta (mm) se lee del
@@ -189,11 +189,12 @@ python unified_report.py beams_residual --infle 222-25 --subinfle B --n 3
 python unified_report.py tapas --infle 245-25 --subinfle A --empresa FADECO --n 6
 ```
 
-Si catman exporta también el Tempsonic (`Time | Tempsonic | Celda`), indique las 3 columnas:
+Por defecto se espera la exportación de catman con Tempsonic (`Time | Tempsonic | Celda`).
+Para archivos antiguos con solo tiempo y carga, indique las 2 columnas:
 
 ```bash
-python unified_report.py tapas --infle 267-26 --empresa COMPANY --n 6 \
-    --file-pattern "Tapa {id}.xlsx" --columns Time Displacement Load
+python unified_report.py tapas --infle 245-25 --subinfle A --empresa FADECO --n 6 \
+    --columns Time Load
 ```
 
 ### Conversión genérica
