@@ -932,7 +932,8 @@ class Beam_residual_strength_test_report(Test_report):
 
     def _cell_writes(self, i, test):
         # Layout 'ResistenciaResidual' (deflexión, ASTM C1609): una fila por muestra,
-        # bloques de 3 columnas (1000*load, deflection, toughness) por punto.
+        # bloques de 3 columnas (1000*load, deflection, toughness) por punto,
+        # desde la columna X: P1 (X), Pmax (AA), Final (AD), L/600 (AG), L/150 (AJ).
         # Nota: la carga se escala ×1000 (kN → N) para la plantilla.
         SHEET = 'ResistenciaResidual'
         row = i + self.start_row
@@ -940,7 +941,7 @@ class Beam_residual_strength_test_report(Test_report):
         for j, (load, deflection, toughness) in enumerate(
             zip(defl_cps['Load'], defl_cps['Deflection'], defl_cps['Toughness'])
         ):
-            col_start = 21 + 3 * j
+            col_start = 24 + 3 * j
             yield SHEET, (row, col_start + 0), 1000 * load
             yield SHEET, (row, col_start + 1), deflection
             yield SHEET, (row, col_start + 2), toughness
