@@ -55,6 +55,16 @@ def convert_excel_to_pdf(
         raise FileNotFoundError(f"Archivo Excel no encontrado: {excel_path}")
     if pdf_path.exists() and not overwrite:
         raise FileExistsError(f"El PDF destino ya existe: {pdf_path}")
+    if pdf_path.exists():
+        # Si el PDF está abierto en un visor, Excel falla con un error COM
+        # poco claro (0x80070079); se detecta antes para avisar al usuario.
+        try:
+            with open(pdf_path, 'r+b'):
+                pass
+        except PermissionError as e:
+            raise PermissionError(
+                f"El PDF destino está abierto en otro programa; ciérrelo y vuelva a intentar: {pdf_path}"
+            ) from e
 
     # Crear directorio destino si no existe
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
