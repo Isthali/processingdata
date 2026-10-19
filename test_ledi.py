@@ -910,7 +910,7 @@ class Beam_residual_strength_test_report(Test_report):
     _standards_map = {
         'ASTMC1609': [0.75, 3.],
     }
-    num_1plot_pag = 4
+    num_1plot_pag = 5
     start_row = 19
     data_file_pattern = '{infle}-Viga {id}/specimen.dat'
     data_columns = ('Time', 'Displacement', 'Load', 'Deflection', 'Deflection2')
