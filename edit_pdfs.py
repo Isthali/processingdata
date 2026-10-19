@@ -55,6 +55,16 @@ def convert_excel_to_pdf(
         raise FileNotFoundError(f"Archivo Excel no encontrado: {excel_path}")
     if pdf_path.exists() and not overwrite:
         raise FileExistsError(f"El PDF destino ya existe: {pdf_path}")
+    if pdf_path.exists():
+        # Si el PDF está abierto en un visor, Excel falla con un error COM
+        # poco claro (0x80070079); se detecta antes para avisar al usuario.
+        try:
+            with open(pdf_path, 'r+b'):
+                pass
+        except PermissionError as e:
+            raise PermissionError(
+                f"El PDF destino está abierto en otro programa; ciérrelo y vuelva a intentar: {pdf_path}"
+            ) from e
 
     # Crear directorio destino si no existe
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,15 +87,25 @@ def convert_excel_to_pdf(
         excel.DisplayAlerts = False  # Evitar diálogos
         
         workbook = excel.Workbooks.Open(str(excel_path))
-        
-        # Constantes: 0 = xlTypePDF
-        export_kwargs = {}
-        if pag_i is not None:
-            export_kwargs['From'] = int(pag_i)
-        if pag_f is not None:
-            export_kwargs['To'] = int(pag_f)
-        
-        workbook.ExportAsFixedFormat(0, str(pdf_path), **export_kwargs)
+
+        # Excel ignora las áreas de impresión escritas por openpyxl aunque el
+        # nombre 'Hoja!Print_Area' exista; reasignarlas vía PageSetup las activa.
+        for sheet in workbook.Worksheets:
+            for name in sheet.Names:
+                if name.Name.endswith('!Print_Area'):
+                    sheet.PageSetup.PrintArea = name.RefersTo.split('!')[-1]
+
+        # Argumentos posicionales: COM ignora From/To pasados como kwargs.
+        # (Type=0 xlTypePDF, Filename, Quality=0 estándar, IncludeDocProperties,
+        #  IgnorePrintAreas, From, To)
+        export_args = [0, str(pdf_path)]
+        if pag_i is not None or pag_f is not None:
+            from_page = int(pag_i) if pag_i is not None else 1
+            export_args += [0, True, False, from_page]
+            if pag_f is not None:
+                export_args.append(int(pag_f))
+
+        workbook.ExportAsFixedFormat(*export_args)
         logger.info("Conversión Excel->PDF completada exitosamente")
         
     except Exception as e:
