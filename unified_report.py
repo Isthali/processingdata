@@ -184,6 +184,15 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
+def parse_sample_id(value: str) -> Union[int, str]:
+    """Convierte un ID de muestra: entero si es numérico ('3' -> 3), texto si
+    lleva sufijo ('15A'), tal como se nombra la carpeta y se muestra en el informe."""
+    value = value.strip()
+    if not value:
+        raise argparse.ArgumentTypeError("El ID de muestra no puede estar vacío")
+    return int(value) if value.isdigit() else value
+
+
 def build_samples_id(n: int, offset: int = 1) -> List[int]:
     """Construye lista de IDs de muestras consecutivos.
     
@@ -292,9 +301,9 @@ def parse_arguments() -> argparse.Namespace:
 
             sample_group.add_argument(
                 '--ids',
-                type=int,
+                type=parse_sample_id,
                 nargs='+',
-                help='IDs específicos de muestras (ej: --ids 3 4 7)'
+                help='IDs específicos de muestras; admiten sufijo de letra (ej: --ids 3 4 7 o --ids 13 14 15A)'
             )
 
             subparser.add_argument(
@@ -398,7 +407,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
     if config['requires_samples']:
         # Validar IDs específicos si se proporcionaron
         if hasattr(args, 'ids') and args.ids is not None:
-            if any(id_val <= 0 for id_val in args.ids):
+            if any(isinstance(id_val, int) and id_val <= 0 for id_val in args.ids):
                 raise ValueError(f"Todos los IDs de muestras deben ser > 0, recibidos: {args.ids}")
         
         # Validar número de muestras si se proporcionó
