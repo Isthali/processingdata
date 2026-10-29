@@ -452,10 +452,14 @@ class Axial_compression_test(Resistance_mechanical_test):
                 sx = self.data[x].iloc[i]
                 sy = self.data['Stress'].iloc[i]
                 ax.plot(sx, sy, 'o', color='tab:red', markersize=7)
+                # Punto 1 a la derecha y punto 2 a la izquierda de la curva, para
+                # que el texto no salga del área del gráfico cuando el punto 2
+                # es el pico del tramo.
                 ax.annotate(
                     f"$\\sigma_{k}$ = {sy:.2f} MPa\n$\\epsilon_{k}$ = {sx:.0f} µε",
-                    xy=(sx, sy), xytext=(12, 5 if k == 1 else -30),
+                    xy=(sx, sy), xytext=(12, 5) if k == 1 else (-12, 0),
                     textcoords='offset points', fontsize=9, color='tab:red',
+                    ha='left' if k == 1 else 'right', va='bottom',
                 )
         return fig, ax
 
