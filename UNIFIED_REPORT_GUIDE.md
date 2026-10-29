@@ -33,6 +33,7 @@ debe contener:
    |-------------------|---------------------------------------------|------------------------------------------|
    | `cores`           | `{infle}-d{id}.xlsx`                        | Time, Displacement, Load                 |
    | `cores_local`     | `{infle}-d{id}.xlsx`                        | Time, Load, Displacement, SG1, SG2, SG3 (SG en µε) |
+   | `elasticity`      | `Probeta {subinfle}{id}.xlsx`               | Time, Load, Displacement, SG1, SG2, SG3, SG4, LoadPos, DisplacementPos (SG en µε) |
    | `panels`          | `Losa P{id}.xlsx`                           | Time, Load, Deflection, Displacement     |
    | `panels_residual` | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, CMOD, Deflection |
    | `beams_residual`  | `{infle}-Viga {id}/specimen.dat`            | Time, Displacement, Load, Deflection, Deflection2 |
@@ -55,6 +56,7 @@ de `add_tests()` o de escribir el Excel, no al parsear los argumentos.
 |-------------------|----------------------------------------------------|----------------------|-------------------------------------------------|---------------|---------------------|
 | `cores`           | Compresión axial de testigos                       | `CORES`              | libre                                           | 6             | `PRODIMIN`          |
 | `cores_local`     | Compresión axial instrumentada con 3 strain gauges (esfuerzo-deformación) | `CORES`              | libre                                           | 3             | `PRODIMIN`          |
+| `elasticity`      | Módulo de elasticidad y ratio de Poisson (ASTM C469) | `Mod-Elasticidad`    | libre                                           | 3             | `PRODIMIN`          |
 | `panels`          | Tenacidad de paneles (ASTM C1550, EFNARC, EN 14488-5) | `EFNARC1996`         | `ASTMC1550`, `EFNARC1996`, `EFNARC1999`, `EN14488-5` | 3             | `PRODIMIN`          |
 | `panels_residual` | Resistencia residual con CMOD (EN 14651 / EN 14488) | `EN14488`            | `EN14651`, `EN14488`                            | 3             | `PRODIMIN`          |
 | `beams_residual`  | Resistencia residual de vigas (ASTM C1609)         | `ASTMC1609`          | `ASTMC1609`                                     | 3             | `PRODIMIN`          |
@@ -91,8 +93,8 @@ Las opciones `--n` y `--ids` son **mutuamente exclusivas**:
 | `--n N`    | Número de muestras consecutivas desde `--offset` (default del subcomando si se omite). |
 | `--offset` | Valor inicial de ID cuando se usa `--n`. Por defecto 1.                  |
 | `--ids`    | Lista explícita de IDs (ej. `--ids 3 4 7`). Anula `--n`/`--offset`.      |
-| `--num-1plot-pag` | Número de página donde inician los gráficos. Controla el rango exportado desde Excel (`pag_f = num_1plot_pag − 1`). Default por subcomando: `panels`/`beams_residual`/`tapas` = 4, `cores`/`cores_local`/`panels_residual` = 5. |
-| `--start-row` | Fila de la plantilla Excel correspondiente a la **primera muestra**, para lectura y escritura. Default por subcomando: `cores`/`cores_local` = 16, `panels` = 18, `panels_residual`/`beams_residual` = 19, `tapas` = 26. Las muestras siguientes ocupan filas según el layout del ensayo: fila consecutiva (`cores`, `panels_residual`, `beams_residual`), bloques de 5 filas (`panels`) o de 3 filas (`tapas`). |
+| `--num-1plot-pag` | Número de página donde inician los gráficos. Controla el rango exportado desde Excel (`pag_f = num_1plot_pag − 1`). Default por subcomando: `elasticity`/`panels`/`beams_residual`/`tapas` = 4, `cores`/`cores_local`/`panels_residual` = 5. |
+| `--start-row` | Fila de la plantilla Excel correspondiente a la **primera muestra**, para lectura y escritura. Default por subcomando: `cores`/`cores_local`/`elasticity` = 16, `panels` = 18, `panels_residual`/`beams_residual` = 19, `tapas` = 26. Las muestras siguientes ocupan filas según el layout del ensayo: fila consecutiva (`cores`, `elasticity`, `panels_residual`, `beams_residual`), bloques de 5 filas (`panels`) o de 3 filas (`tapas`). |
 | `--file-pattern` | Patrón del nombre del archivo de datos por muestra, relativo a `{base-dir}/{infle}/`. Marcadores: `{id}` (obligatorio), `{infle}`, `{subinfle}`. La extensión decide el lector: `.xlsx`/`.xlsm`/`.xls` se leen como Excel, cualquier otra (`.dat`, `.txt`, `.csv`) como texto delimitado. Ej.: `--file-pattern "Panel M{id}.xlsx"` o `--file-pattern "losa M{id}.xlsx"`. Defaults: ver tabla de archivos arriba (`cores` prueba `{infle}-d{id}/specimen.dat` y luego `{infle}-d{id}.xlsx`). |
 | `--columns` | Nombres de las columnas del archivo de datos **en el orden en que aparecen en el archivo** (se asignan posicionalmente). Ej.: `--columns Time Deflection Load Displacement`. Cada ensayo exige ciertas columnas (`Load` siempre; `Deflection`, `CMOD`, `Displacement` o `Time` según el tipo); si falta una, el error lo indica al iniciar. Para archivos Excel, la cantidad de nombres debe coincidir con la cantidad de columnas de datos del archivo; si no coincide, la lectura se detiene con un error (antes se desplazaban los nombres en silencio). |
 | `--config` | Ruta a un JSON de configuración del informe. Si se omite, se busca `report_config.json` en `{base-dir}/{infle}/` automáticamente. Ver sección siguiente. |
@@ -149,6 +151,30 @@ El archivo de datos por probeta es `{infle}-d{id}.xlsx` con columnas
 `Time, Load, Displacement, SG1, SG2, SG3` (las SG en microdeformación). El
 informe agrega un segundo gráfico Esfuerzo–Deformación además del usual
 Fuerza–Desplazamiento, con esfuerzo en MPa y deformación unitaria (mm/mm).
+
+### Módulo de elasticidad y ratio de Poisson (ASTM C469)
+
+```bash
+# Probetas 'Probeta B1.xlsx', 'Probeta B2.xlsx', 'Probeta B5.xlsx'
+python unified_report.py elasticity --infle 221-26 --subinfle B --empresa RIBAB --ids 1 2 5 \
+    --base-dir "D:/IM/01 SERVICIOS/24 MODULO DE ELASTICIDAD"
+```
+
+Reemplaza al script de MATLAB `Elasticidad_Poisson_SG.m`. El archivo de datos
+es la exportación de catman `Time | CC_MU | LVDT_MU | SG1..SG4 | CC_MU_pos |
+LVDT_MU_pos`. SG1 y SG3 son los gauges longitudinales y SG2 y SG4 los
+transversales; si el cableado cambia, reordene los nombres con `--columns`
+(se asignan por posición).
+
+- Se detectan los ciclos de carga (valles de descarga). El primero es de
+  asentamiento; E y ν se calculan en cada ciclo siguiente y se promedian.
+- En cada ciclo: punto 1 = deformación longitudinal de 50 µε, punto 2 = 40 %
+  del esfuerzo máximo de la probeta. `E = Δσ / Δε_L` y `ν = Δε_T / Δε_L`.
+- El diámetro se lee de `'Cores'!F{fila}`. Se escriben `P` (E, MPa), `R` (ν)
+  e `Y` (carga máxima, kN); la plantilla calcula R'c.
+- Por probeta se grafican Esfuerzo–Deformación longitudinal y transversal (con
+  los puntos 1 y 2 marcados) y Deformación transversal–longitudinal del último
+  ciclo, que llega a la rotura.
 
 ### Tenacidad de paneles
 

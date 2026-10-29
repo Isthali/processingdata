@@ -48,6 +48,7 @@ The report classes **do not generate the Excel template or the raw data files** 
 - A pre-configured template workbook named `INFLE_{infle}[-{subinfle}]_{standard}_{client}[_{n}].xlsm` (or `.xlsx` for `generic`) with the sheets and cells the report writes into (`Resultados`, `Cores`, etc. — see each report's `write_report`).
 - Per-sample raw data files with type-specific naming (defaults below; overridable via `--file-pattern`/`--columns` or a `report_config.json` in `{base-dir}/{infle}/` — class attributes `data_file_pattern`/`data_columns` on each report class, loader chosen by file extension):
   - `cores`: `{infle}-d{id}.xlsx` with columns Time/Displacement/Load
+  - `elasticity`: `Probeta {subinfle}{id}.xlsx` with Time/Load/Displacement/SG1-SG4/LoadPos/DisplacementPos (SG1, SG3 longitudinal; SG2, SG4 transversal)
   - `panels`: `Losa P{id}.xlsx` with Time/Load/Deflection/Displacement
   - `panels_residual` / `beams_residual`: expect CMOD or Deflection columns depending on standard
   - `tapas`: `tapas_{id}.xlsx` with Time/Displacement/Load

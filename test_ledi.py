@@ -264,6 +264,9 @@ class Axial_compression_test(Resistance_mechanical_test):
         self.area_sec: float = 0.0
         self.strength: float = 0.0
         self.correction_factor: float = 1.0
+        self.elastic_modulus: float = 0.0
+        self.poisson_ratio: float = 0.0
+        self.elastic_points: List[tuple] = []
 
     def get_area_section(self, length_sec: Union[float, List[float]], section_type: str) -> float:
         """Calcula el área de la sección transversal según el tipo de geometría.
@@ -333,6 +336,116 @@ class Axial_compression_test(Resistance_mechanical_test):
             avg = avg / 1e6
         self.data['Strain'] = avg
         return self.data['Strain']
+
+    def get_strain_components(
+        self,
+        long_cols: Sequence[str] = ('SG1', 'SG3'),
+        trans_cols: Sequence[str] = ('SG2', 'SG4'),
+    ) -> pd.DataFrame:
+        """Promedia los strain gauges longitudinales y transversales por separado.
+
+        Guarda ``Strain_L`` y ``Strain_T`` en µε (10⁻⁶ mm/mm), promedio del valor
+        absoluto de cada grupo, como en ``Elasticidad_Poisson_SG.m``.
+        """
+        if self.data.empty:
+            raise ValueError("Cargue datos antes de calcular la deformación.")
+        for name, gauge_cols in (('Strain_L', long_cols), ('Strain_T', trans_cols)):
+            cols = [c for c in gauge_cols if c in self.data.columns]
+            if not cols:
+                raise ValueError(
+                    f"Ninguna columna de {list(gauge_cols)} encontrada para {name}. "
+                    f"Disponibles: {self.data.columns.tolist()}"
+                )
+            self.data[name] = self.data[cols].abs().mean(axis=1)
+        return self.data[['Strain_L', 'Strain_T']]
+
+    def get_load_cycles(self, prominence_ratio: float = 0.2) -> List[tuple]:
+        """Detecta los tramos de carga de un ensayo cíclico (equivalente a ``CyclicAnalysis.m``).
+
+        Los valles de descarga se buscan como picos de ``-|Load|`` con prominencia
+        mínima ``prominence_ratio * maxLoad``; cada tramo va desde el inicio o un
+        valle hasta la carga máxima antes del siguiente valle.
+
+        Returns:
+            Lista de tuplas ``(inicio, pico)`` con posiciones en ``self.data``.
+        """
+        if self.data.empty or 'Load' not in self.data.columns:
+            raise ValueError("Cargue datos con columna 'Load' antes de detectar ciclos.")
+        loads = self.data['Load'].abs().to_numpy()
+        valleys, _ = sp.signal.find_peaks(-loads, prominence=prominence_ratio * loads.max())
+        starts = [0] + [int(v) for v in valleys]
+        ends = starts[1:] + [len(loads)]
+        return [(s, s + int(np.argmax(loads[s:e]))) for s, e in zip(starts, ends)]
+
+    def get_elastic_modulus(
+        self,
+        strain_lower: float = 50.0,
+        stress_ratio: float = 0.4,
+        skip_cycles: int = 1,
+    ) -> tuple:
+        """Módulo de elasticidad y ratio de Poisson según ASTM C469 (``ControlValuesASTMC469.m``).
+
+        En cada tramo de carga posterior a los ``skip_cycles`` de asentamiento:
+        el punto 1 es la deformación longitudinal más cercana a ``strain_lower`` µε
+        y el punto 2 el esfuerzo más cercano a ``stress_ratio * strength``.
+        ``E = Δσ / Δε_L`` (MPa) y ``ν = Δε_T / Δε_L``; se promedian los tramos.
+
+        Requiere ``get_strength`` y ``get_strain_components`` previos. Deja en
+        ``self.elastic_points`` los índices (punto 1, punto 2) de cada tramo y en
+        ``self.idx['i']/['f']`` el último tramo de carga.
+        """
+        if 'Stress' not in self.data.columns or 'Strain_L' not in self.data.columns:
+            raise ValueError("Calcule get_strength y get_strain_components antes del módulo de elasticidad.")
+        cycles = self.get_load_cycles()
+        cycles_used = cycles[skip_cycles:]
+        if not cycles_used:
+            raise ValueError(
+                f"Muestra {self.sample_id}: se detectaron {len(cycles)} ciclo(s) de carga; "
+                f"se necesitan más de {skip_cycles} (el primero es de asentamiento)."
+            )
+        stress = self.data['Stress'].to_numpy()
+        strain_l = self.data['Strain_L'].to_numpy()
+        strain_t = self.data['Strain_T'].to_numpy()
+        stress_2 = stress_ratio * self.strength
+        moduli, ratios = [], []
+        self.elastic_points = []
+        for start, peak in cycles_used:
+            i1 = start + int(np.argmin(np.abs(strain_l[start:peak + 1] - strain_lower)))
+            i2 = start + int(np.argmin(np.abs(stress[start:peak + 1] - stress_2)))
+            d_strain_l = strain_l[i2] - strain_l[i1]
+            if d_strain_l <= 0:
+                raise ValueError(
+                    f"Muestra {self.sample_id}: Δε_L no positivo en el tramo {start}-{peak} "
+                    f"(ε_L1={strain_l[i1]:.1f}, ε_L2={strain_l[i2]:.1f} µε)."
+                )
+            moduli.append((stress[i2] - stress[i1]) / (1e-6 * d_strain_l))
+            ratios.append((strain_t[i2] - strain_t[i1]) / d_strain_l)
+            self.elastic_points.append((i1, i2))
+        self.elastic_modulus = float(np.mean(moduli))
+        self.poisson_ratio = float(np.mean(ratios))
+        self.idx['i'], self.idx['f'] = cycles_used[-1]
+        logger.info(
+            "Muestra %s: %d tramo(s) de carga usados, E = %.0f MPa, ν = %.3f",
+            self.sample_id, len(cycles_used), self.elastic_modulus, self.poisson_ratio,
+        )
+        return self.elastic_modulus, self.poisson_ratio
+
+    def plot_data(self, x, y, *args, **kwargs):
+        """Como ``Mechanical_test.plot_data``; marca los puntos 1 y 2 de ASTM C469
+        del último tramo en los gráficos Esfuerzo-Deformación."""
+        fig, ax = super().plot_data(x, y, *args, **kwargs)
+        points = getattr(self, 'elastic_points', None)
+        if points and y == 'Stress' and x in ('Strain_L', 'Strain_T'):
+            for k, i in enumerate(points[-1], start=1):
+                sx = self.data[x].iloc[i]
+                sy = self.data['Stress'].iloc[i]
+                ax.plot(sx, sy, 'o', color='tab:red', markersize=7)
+                ax.annotate(
+                    f"$\\sigma_{k}$ = {sy:.2f} MPa\n$\\epsilon_{k}$ = {sx:.0f} µε",
+                    xy=(sx, sy), xytext=(12, 5 if k == 1 else -30),
+                    textcoords='offset points', fontsize=9, color='tab:red',
+                )
+        return fig, ax
 
 class Flexion_test(Resistance_mechanical_test):
     """Ensayo de flexión con cálculo de momento flector y resistencia."""
@@ -1094,6 +1207,73 @@ class Axial_compression_local_test_report(Axial_compression_test_report):
             'ylabel': ['Fuerza (kN)', 'Esfuerzo (MPa)'],
             'sample_name': 'CORE',
             'test_name': 'ENSAYO DE RESISTENCIA A LA COMPRESIÓN',
+            'comparative': False,
+        }
+
+class Elastic_modulus_test_report(Axial_compression_test_report):
+    """Módulo de elasticidad y ratio de Poisson en compresión (ASTM C469).
+
+    Reemplaza a ``Elasticidad_Poisson_SG.m``. El archivo de datos por probeta
+    (exportación de catman) tiene columnas ``[Time, Load, Displacement, SG1,
+    SG2, SG3, SG4, LoadPos, DisplacementPos]``; los gauges longitudinales son
+    ``strain_long_cols`` y los transversales ``strain_trans_cols`` (si el
+    cableado cambia, reordene los nombres con ``--columns``).
+
+    El ensayo tiene un ciclo de asentamiento y al menos dos ciclos de carga; el
+    último llega a la rotura. E y ν se promedian sobre los ciclos posteriores
+    al asentamiento. El esfuerzo usado para E no se corrige por esbeltez.
+
+    Layout 'Cores' (fila i+start_row): lee F (diámetro mm) y escribe
+    P=16 (E MPa), R=18 (ν) e Y=25 (carga máx kN); la plantilla calcula R'c.
+    """
+
+    num_1plot_pag = 4
+    data_file_pattern = 'Probeta {subinfle}{id}.xlsx'
+    data_columns = ('Time', 'Load', 'Displacement', 'SG1', 'SG2', 'SG3', 'SG4', 'LoadPos', 'DisplacementPos')
+    _required_columns = frozenset({'Load'})
+    strain_long_cols = ('SG1', 'SG3')
+    strain_trans_cols = ('SG2', 'SG4')
+
+    def add_tests(self):
+        for i, id in enumerate(self.samples_id):
+            diameter, _ = self._read_template_geometry(i)
+            test = Axial_compression_test(
+                sample_id=id,
+                data_file=str(self._resolve_data_file(id)),
+            )
+            self._load_test_data(test)
+            test.get_max_load()
+            test.get_area_section(length_sec=diameter, section_type='circular')
+            test.get_strength(correction_factor=1.0)
+            test.get_strain_components(long_cols=self.strain_long_cols, trans_cols=self.strain_trans_cols)
+            test.get_elastic_modulus()
+            test.data_process = test.data.iloc[test.idx['i']:test.idx['f'] + 1, :]
+            self.tests.append(test)
+
+    def _cell_writes(self, i, test):
+        SHEET = 'Cores'
+        row = i + self.start_row
+        yield SHEET, (row, 16), test.elastic_modulus
+        yield SHEET, (row, 18), test.poisson_ratio
+        yield SHEET, (row, 25), test.maxLoad
+
+    def plot_spec(self) -> dict:
+        strain_label = 'Deformación unitaria {} (10⁻⁶ mm/mm)'
+        return {
+            'x': ['Strain_L', 'Strain_T', 'Strain_L'],
+            'y': ['Stress', 'Stress', 'Strain_T'],
+            'xlim': [(0, None)] * 3,
+            'ylim': [(0, None)] * 3,
+            'title': [
+                'Esfuerzo-Deformación longitudinal',
+                'Esfuerzo-Deformación transversal',
+                'Deformación transversal-Deformación longitudinal',
+            ],
+            'xlabel': [strain_label.format('longitudinal'), strain_label.format('transversal'),
+                       strain_label.format('longitudinal')],
+            'ylabel': ['Esfuerzo (MPa)', 'Esfuerzo (MPa)', strain_label.format('transversal')],
+            'sample_name': 'PROBETA',
+            'test_name': 'MÓDULO DE ELASTICIDAD DEL CONCRETO',
             'comparative': False,
         }
 
