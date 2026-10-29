@@ -170,11 +170,18 @@ transversales; si el cableado cambia, reordene los nombres con `--columns`
   asentamiento; E y ν se calculan en cada ciclo siguiente y se promedian.
 - En cada ciclo: punto 1 = deformación longitudinal de 50 µε, punto 2 = 40 %
   del esfuerzo máximo de la probeta. `E = Δσ / Δε_L` y `ν = Δε_T / Δε_L`.
-- El diámetro se lee de `'Cores'!F{fila}`. Se escriben `P` (E, MPa), `R` (ν)
-  e `Y` (carga máxima, kN); la plantilla calcula R'c.
+- Los ciclos se cargan hasta el 40 % de la carga máxima estimada. Si la
+  resistencia es menor que la capacidad del equipo (220 kN), el último ciclo
+  llega a la rotura: deje `'Cores'!Y{fila}` vacía y se usa (y escribe) el
+  máximo de los datos. Si la rotura se hizo en otro equipo, escriba esa carga
+  (kN) en `Y{fila}` antes de correr el script: se usa para el 40 % y no se
+  sobreescribe. Si Y es menor que la carga registrada en el ensayo, el
+  script se detiene con un error.
+- El diámetro se lee de `'Cores'!F{fila}`. Se escriben `P` (E, MPa) y `R` (ν);
+  la plantilla calcula R'c.
 - Por probeta se grafican Esfuerzo–Deformación longitudinal y transversal (con
   los puntos 1 y 2 marcados) y Deformación transversal–longitudinal del último
-  ciclo, que llega a la rotura.
+  ciclo.
 
 ### Tenacidad de paneles
 

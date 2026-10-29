@@ -382,13 +382,19 @@ class Axial_compression_test(Resistance_mechanical_test):
         strain_lower: float = 50.0,
         stress_ratio: float = 0.4,
         skip_cycles: int = 1,
+        max_stress: float | None = None,
     ) -> tuple:
         """Módulo de elasticidad y ratio de Poisson según ASTM C469 (``ControlValuesASTMC469.m``).
 
         En cada tramo de carga posterior a los ``skip_cycles`` de asentamiento:
         el punto 1 es la deformación longitudinal más cercana a ``strain_lower`` µε
-        y el punto 2 el esfuerzo más cercano a ``stress_ratio * strength``.
+        y el punto 2 el esfuerzo más cercano a ``stress_ratio * max_stress``.
         ``E = Δσ / Δε_L`` (MPa) y ``ν = Δε_T / Δε_L``; se promedian los tramos.
+
+        Args:
+            max_stress: Resistencia (MPa) de referencia para el punto 2. Si la
+                rotura se hizo en otro equipo, es la de esa rotura; por defecto
+                ``self.strength`` (máximo de los datos, rotura en este equipo).
 
         Requiere ``get_strength`` y ``get_strain_components`` previos. Deja en
         ``self.elastic_points`` los índices (punto 1, punto 2) de cada tramo y en
@@ -406,10 +412,16 @@ class Axial_compression_test(Resistance_mechanical_test):
         stress = self.data['Stress'].to_numpy()
         strain_l = self.data['Strain_L'].to_numpy()
         strain_t = self.data['Strain_T'].to_numpy()
-        stress_2 = stress_ratio * self.strength
+        stress_2 = stress_ratio * (self.strength if max_stress is None else max_stress)
         moduli, ratios = [], []
         self.elastic_points = []
         for start, peak in cycles_used:
+            if stress[peak] < 0.95 * stress_2:
+                logger.warning(
+                    "Muestra %s: el tramo %d-%d llega a %.2f MPa, por debajo del %.0f %% del máximo (%.2f MPa); "
+                    "el punto 2 se toma en el pico del tramo.",
+                    self.sample_id, start, peak, stress[peak], 100 * stress_ratio, stress_2,
+                )
             i1 = start + int(np.argmin(np.abs(strain_l[start:peak + 1] - strain_lower)))
             i2 = start + int(np.argmin(np.abs(stress[start:peak + 1] - stress_2)))
             d_strain_l = strain_l[i2] - strain_l[i1]
@@ -1219,12 +1231,17 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
     ``strain_long_cols`` y los transversales ``strain_trans_cols`` (si el
     cableado cambia, reordene los nombres con ``--columns``).
 
-    El ensayo tiene un ciclo de asentamiento y al menos dos ciclos de carga; el
-    último llega a la rotura. E y ν se promedian sobre los ciclos posteriores
-    al asentamiento. El esfuerzo usado para E no se corrige por esbeltez.
+    El ensayo tiene un ciclo de asentamiento y al menos dos ciclos de carga
+    hasta el 40 % de la carga máxima estimada. Si la resistencia es menor que
+    la capacidad del equipo, el último ciclo llega a la rotura; si no, la
+    rotura se hace en otro equipo. E y ν se promedian sobre los ciclos
+    posteriores al asentamiento. El esfuerzo usado para E no se corrige por
+    esbeltez.
 
-    Layout 'Cores' (fila i+start_row): lee F (diámetro mm) y escribe
-    P=16 (E MPa), R=18 (ν) e Y=25 (carga máx kN); la plantilla calcula R'c.
+    Layout 'Cores' (fila i+start_row): lee F (diámetro mm) e Y (carga máx kN).
+    Si Y tiene valor, es la rotura en otro equipo y define el 40 %; si está
+    vacía, se usa el máximo de los datos y se escribe en Y. Escribe P=16
+    (E MPa) y R=18 (ν); la plantilla calcula R'c.
     """
 
     num_1plot_pag = 4
@@ -1235,6 +1252,7 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
     strain_trans_cols = ('SG2', 'SG4')
 
     def add_tests(self):
+        self._external_loads = []
         for i, id in enumerate(self.samples_id):
             diameter, _ = self._read_template_geometry(i)
             test = Axial_compression_test(
@@ -1246,16 +1264,37 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
             test.get_area_section(length_sec=diameter, section_type='circular')
             test.get_strength(correction_factor=1.0)
             test.get_strain_components(long_cols=self.strain_long_cols, trans_cols=self.strain_trans_cols)
-            test.get_elastic_modulus()
+            external_load = self._read_template_max_load(i, test)
+            max_stress = None
+            if external_load is not None:
+                max_stress = 1000.0 * external_load / test.area_sec
+                logger.info(f"Muestra {id}: carga máxima de la plantilla {external_load:.1f} kN (rotura en otro equipo)")
+            test.get_elastic_modulus(max_stress=max_stress)
             test.data_process = test.data.iloc[test.idx['i']:test.idx['f'] + 1, :]
             self.tests.append(test)
+            self._external_loads.append(external_load)
+
+    def _read_template_max_load(self, i, test):
+        """Lee la carga máxima de rotura en otro equipo (``'Cores'!Y``), o None si está vacía."""
+        row = i + self.start_row
+        value = get_data_excel(file_path=self.excel_file, sheet_idx='Cores', position=(row, 25))
+        if value is None or value == '':
+            return None
+        load = float(value)
+        if load < test.maxLoad:
+            raise ValueError(
+                f"Carga máxima en 'Cores'!Y{row} ({load:.1f} kN) menor que la registrada en el ensayo "
+                f"({test.maxLoad:.1f} kN). Corrija Y{row} o déjela vacía si la rotura fue en este equipo."
+            )
+        return load
 
     def _cell_writes(self, i, test):
         SHEET = 'Cores'
         row = i + self.start_row
         yield SHEET, (row, 16), test.elastic_modulus
         yield SHEET, (row, 18), test.poisson_ratio
-        yield SHEET, (row, 25), test.maxLoad
+        if self._external_loads[i] is None:
+            yield SHEET, (row, 25), test.maxLoad
 
     def plot_spec(self) -> dict:
         strain_label = 'Deformación unitaria {} (10⁻⁶ mm/mm)'
