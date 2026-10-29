@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import List, Sequence, Union
 
 import numpy as np
+import openpyxl
+from openpyxl.utils import get_column_letter
 import scipy as sp
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -1242,10 +1244,13 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
     posteriores al asentamiento. El esfuerzo usado para E no se corrige por
     esbeltez.
 
-    Layout 'Cores' (fila i+start_row): lee F (diámetro mm) e Y (carga máx kN).
-    Si Y tiene valor, es la rotura en otro equipo y define el 40 %; si está
-    vacía, se usa el máximo de los datos y se escribe en Y. Escribe P=16
-    (E MPa) y R=18 (ν); la plantilla calcula R'c.
+    Layout 'Cores' (fila i+start_row): lee el diámetro (mm) y la carga máxima
+    (kN, columna 'L.Dir.Correg.'). Si la carga tiene valor, es la rotura en
+    otro equipo y define el 40 %; si está vacía, se usa el máximo de los
+    datos y se escribe ahí. Escribe E (MPa) y ν; la plantilla calcula R'c.
+    Las columnas se ubican por su encabezado (``_template_headers``), de modo
+    que la plantilla admite columnas agregadas o eliminadas; si un
+    encabezado no aparece se usa la columna de ``_default_template_cols``.
     """
 
     num_1plot_pag = 4
@@ -1254,11 +1259,41 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
     _required_columns = frozenset({'Load'})
     strain_long_cols = ('SG1', 'SG3')
     strain_trans_cols = ('SG2', 'SG4')
+    # Encabezado (en minúsculas, sin espacios extremos) -> clave de columna.
+    _template_headers = {'diam.': 'diameter', 'e': 'modulus', 'ratio': 'poisson', 'l.dir.correg.': 'max_load'}
+    # Plantilla original: F (diámetro), P (E MPa), R (ν), Y (carga máx kN).
+    _default_template_cols = {'diameter': 6, 'modulus': 16, 'poisson': 18, 'max_load': 25}
+
+    def _find_template_columns(self) -> dict:
+        """Ubica las columnas de 'Cores' buscando sus encabezados sobre ``start_row``."""
+        wb = openpyxl.load_workbook(self.excel_file, read_only=True)
+        try:
+            ws = wb['Cores']
+            found = {}
+            for row in ws.iter_rows(min_row=1, max_row=self.start_row - 1):
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        key = self._template_headers.get(cell.value.strip().lower())
+                        if key and key not in found:
+                            found[key] = cell.column
+        finally:
+            wb.close()
+        cols = {**self._default_template_cols, **found}
+        missing = sorted(set(self._default_template_cols) - set(found))
+        if missing:
+            logger.warning("Encabezados no encontrados en 'Cores' para %s; se usan columnas por defecto.", missing)
+        return cols
 
     def add_tests(self):
         self._external_loads = []
+        self._cols = self._find_template_columns()
         for i, id in enumerate(self.samples_id):
-            diameter, _ = self._read_template_geometry(i)
+            row = i + self.start_row
+            diameter = get_data_excel(file_path=self.excel_file, sheet_idx='Cores', position=(row, self._cols['diameter']))
+            if not isinstance(diameter, (int, float)) or diameter <= 0:
+                raise ValueError(
+                    f"Diámetro inválido en 'Cores'!{get_column_letter(self._cols['diameter'])}{row}: {diameter!r}"
+                )
             test = Axial_compression_test(
                 sample_id=id,
                 data_file=str(self._resolve_data_file(id)),
@@ -1279,26 +1314,29 @@ class Elastic_modulus_test_report(Axial_compression_test_report):
             self._external_loads.append(external_load)
 
     def _read_template_max_load(self, i, test):
-        """Lee la carga máxima de rotura en otro equipo (``'Cores'!Y``), o None si está vacía."""
+        """Lee la carga máxima de rotura en otro equipo (columna 'L.Dir.Correg.'), o None si está vacía."""
         row = i + self.start_row
-        value = get_data_excel(file_path=self.excel_file, sheet_idx='Cores', position=(row, 25))
+        cell = f"'Cores'!{get_column_letter(self._cols['max_load'])}{row}"
+        value = get_data_excel(file_path=self.excel_file, sheet_idx='Cores', position=(row, self._cols['max_load']))
         if value is None or value == '':
             return None
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"Carga máxima en {cell} debe ser un número en kN: {value!r}")
         load = float(value)
         if load < test.maxLoad:
             raise ValueError(
-                f"Carga máxima en 'Cores'!Y{row} ({load:.1f} kN) menor que la registrada en el ensayo "
-                f"({test.maxLoad:.1f} kN). Corrija Y{row} o déjela vacía si la rotura fue en este equipo."
+                f"Carga máxima en {cell} ({load:.1f} kN) menor que la registrada en el ensayo "
+                f"({test.maxLoad:.1f} kN). Corríjala o déjela vacía si la rotura fue en este equipo."
             )
         return load
 
     def _cell_writes(self, i, test):
         SHEET = 'Cores'
         row = i + self.start_row
-        yield SHEET, (row, 16), test.elastic_modulus
-        yield SHEET, (row, 18), test.poisson_ratio
+        yield SHEET, (row, self._cols['modulus']), test.elastic_modulus
+        yield SHEET, (row, self._cols['poisson']), test.poisson_ratio
         if self._external_loads[i] is None:
-            yield SHEET, (row, 25), test.maxLoad
+            yield SHEET, (row, self._cols['max_load']), test.maxLoad
 
     def plot_spec(self) -> dict:
         strain_label = 'Deformación unitaria {} (10⁻⁶ mm/mm)'
