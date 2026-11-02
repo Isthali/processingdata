@@ -204,6 +204,31 @@ python unified_report.py generic --infle 336-24 --subinfle S \
     --empresa EMPRESA_CLIENTE
 ```
 
+### Convertir cualquier Excel a PDF (`pdf`)
+
+Para informes ya preparados en Excel con cualquier nombre (Brasilero, poros
+permeables, etc.). Exporta todas las hojas visibles, pasa las páginas a
+vertical y superpone el encabezado/pie del laboratorio. El PDF queda con el
+mismo nombre y en la misma carpeta que el Excel.
+
+```bash
+python unified_report.py pdf "D:/IM/01 SERVICIOS/12 POROS PERMEABLES/2026/221-26/LE 221-26-C AbsPePPerm RIBAB.xlsx"
+
+# Con encabezado acreditado (INACAL), sin encabezado, o con otra ruta de salida
+python unified_report.py pdf "ruta/al/archivo.xlsx" --formato acreditado
+python unified_report.py pdf "ruta/al/archivo.xlsx" --formato ninguno
+python unified_report.py pdf "ruta/al/archivo.xlsx" --salida "ruta/al/informe.pdf"
+```
+
+| Flag | Descripción |
+|------|-------------|
+| `archivo` | Ruta del Excel (`.xlsx`, `.xlsm`, `.xls`). Entre comillas si tiene espacios. |
+| `--formato` | `no_acreditado` (por defecto), `acreditado` o `ninguno`. |
+| `--salida` | Ruta del PDF. Por defecto, la del Excel con extensión `.pdf`. |
+
+Cierre el Excel y el PDF antes de ejecutar. Si el Excel tiene macros
+`Workbook_Open`, se ejecutan al abrirlo para la conversión.
+
 ## Archivos de salida
 
 Dentro de `{base-dir}/{infle}/` quedan:

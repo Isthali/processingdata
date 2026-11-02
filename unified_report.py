@@ -8,8 +8,13 @@ Este script puede generar reportes para múltiples tipos de ensayos mecánicos:
 - beams_residual: Ensayos de resistencia residual de vigas por deflexión (ASTM C1609)
 - tapas: Ensayos de flexión de tapas de buzón (tránsito)
 - generic: Conversión genérica Excel -> PDF
+- pdf: Convierte cualquier Excel ya preparado a PDF con el encabezado del laboratorio
 
 Ejemplos de uso:
+    # Convertir un Excel cualquiera (PDF con el mismo nombre, en la misma carpeta)
+    python unified_report.py pdf "D:/IM/01 SERVICIOS/12 POROS PERMEABLES/2026/221-26/LE 221-26-C AbsPePPerm RIBAB.xlsx"
+    python unified_report.py pdf "D:/.../LE 221-26-B Brasilero RIBAB.xlsx" --formato acreditado
+
     # Reporte de testigos de hormigón
     python unified_report.py cores --infle 336-24 --subinfle S --standard CORES --empresa PRODIMIN --n 6
 
@@ -52,7 +57,16 @@ from test_ledi import (
     Test_report
 )
 from report_helpers import prepare_output_dir, run_report
+from edit_pdfs import convert_excel_to_pdf, normalize_pdf_orientation, apply_header_footer_pdf
 
+
+# Encabezados/pies del laboratorio para el subcomando 'pdf' (relativos al script,
+# para que funcione desde cualquier carpeta).
+HEADER_FORMATS = {
+    'acreditado': Path(__file__).resolve().parent / 'formatos' / 'formato_acreditado.pdf',
+    'no_acreditado': Path(__file__).resolve().parent / 'formatos' / 'formato_no_acreditado.pdf',
+    'ninguno': None,
+}
 
 # Configuración de tipos de ensayo
 REPORT_CONFIGS = {
@@ -384,8 +398,44 @@ def parse_arguments() -> argparse.Namespace:
             action='store_true',
             help='Habilita salida verbose'
         )
-    
+
+    pdf_parser = subparsers.add_parser(
+        'pdf',
+        help='Convierte un Excel ya preparado a PDF con el encabezado del laboratorio'
+    )
+    pdf_parser.add_argument('archivo', help='Ruta del archivo Excel (.xlsx, .xlsm, .xls)')
+    pdf_parser.add_argument(
+        '--formato',
+        choices=list(HEADER_FORMATS),
+        default='no_acreditado',
+        help='Encabezado/pie del laboratorio a superponer (por defecto: no_acreditado)'
+    )
+    pdf_parser.add_argument(
+        '--salida',
+        default=None,
+        help='Ruta del PDF de salida (por defecto: mismo nombre y carpeta que el Excel)'
+    )
+    pdf_parser.add_argument('--verbose', '-v', action='store_true', help='Habilita salida verbose')
+
     return parser.parse_args()
+
+
+def convert_excel_file(args: argparse.Namespace) -> Path:
+    """Subcomando 'pdf': exporta el libro completo, lo pasa a vertical y aplica el encabezado."""
+    excel_path = Path(args.archivo)
+    if not excel_path.exists():
+        raise FileNotFoundError(f"No se encontró el archivo Excel: {excel_path}")
+    if excel_path.suffix.lower() not in ('.xlsx', '.xlsm', '.xls'):
+        raise ValueError(f"El archivo debe ser Excel (.xlsx, .xlsm, .xls): {excel_path}")
+    pdf_path = Path(args.salida) if args.salida else excel_path.with_suffix('.pdf')
+
+    convert_excel_to_pdf(excel_path=excel_path, pdf_path=pdf_path)
+    normalize_pdf_orientation(input_pdf_path=pdf_path, output_pdf_path=pdf_path, desired_orientation='portrait')
+    header = HEADER_FORMATS[args.formato]
+    if header is not None:
+        apply_header_footer_pdf(input_pdf_path=pdf_path, header_footer_pdf_path=header, output_pdf_path=pdf_path)
+    print(f"PDF generado: {pdf_path}")
+    return pdf_path
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
@@ -497,7 +547,12 @@ def main() -> None:
         
         logging.info(f"Iniciando generación de reporte tipo: {args.test_type}")
         logging.debug(f"Argumentos recibidos: {vars(args)}")
-        
+
+        if args.test_type == 'pdf':
+            convert_excel_file(args)
+            logging.info("Proceso completado exitosamente")
+            return
+
         # Validar argumentos
         validate_arguments(args)
         
